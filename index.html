@@ -1,0 +1,242 @@
+````html
+<!DOCTYPE html>
+<html>
+<head>
+<title>Drake Final Assistant</title>
+</head>
+
+<body>
+
+<button onclick="connectBLE()">CONNECT LIGHT</button>
+<button onclick="loginSpotify()">LOGIN SPOTIFY</button>
+
+<pre id="debug" style="background:black;color:#00ff00;height:200px;overflow:auto"></pre>
+
+<script src="https://sdk.scdn.co/spotify-player.js"></script>
+
+<script>
+
+// ================= CONFIG =================
+
+const MISTRAL_KEY = "sb4uBrl67jk1RV2gg1gLZqh2lkoSq3Py"
+const SPOTIFY_CLIENT_ID = "PUT_SPOTIFY_CLIENT_ID"
+const REDIRECT_URI = "http://localhost:8000"
+
+const DEVICE_NAME="CLK"
+const SERVICE_UUID="0000fff0-0000-1000-8000-00805f9b34fb"
+const CHAR_UUID="0000fff3-0000-1000-8000-00805f9b34fb"
+
+let char=null
+let access_token=null
+let player=null
+let device_id=null
+
+// ================= DEBUG =================
+
+function log(t){
+document.getElementById("debug").textContent+=t+"\n"
+}
+
+// ================= BLE =================
+
+function packet(r,g,b){
+return new Uint8Array([0x7e,0x07,0x05,0x03,r,g,b,0x10,0xef])
+}
+
+async function connectBLE(){
+
+const device=await navigator.bluetooth.requestDevice({
+filters:[{namePrefix:DEVICE_NAME}],
+optionalServices:[SERVICE_UUID]
+})
+
+const server=await device.gatt.connect()
+const service=await server.getPrimaryService(SERVICE_UUID)
+char=await service.getCharacteristic(CHAR_UUID)
+
+log("BLE CONNECTED")
+
+}
+
+async function setLight(r,g,b){
+
+if(!char) return
+
+await char.writeValueWithoutResponse(packet(r,g,b))
+
+}
+
+// ================= SPOTIFY LOGIN =================
+
+function loginSpotify(){
+
+const scope="streaming user-read-email user-read-private user-modify-playback-state"
+
+window.location =
+"https://accounts.spotify.com/authorize"+
+"?client_id="+SPOTIFY_CLIENT_ID+
+"&response_type=token"+
+"&redirect_uri="+encodeURIComponent(REDIRECT_URI)+
+"&scope="+encodeURIComponent(scope)
+
+}
+
+window.onload=()=>{
+
+if(window.location.hash){
+
+const hash=new URLSearchParams(window.location.hash.substring(1))
+access_token=hash.get("access_token")
+
+initSpotify()
+
+}
+
+}
+
+// ================= SPOTIFY PLAYER =================
+
+function initSpotify(){
+
+player=new Spotify.Player({
+name:"Drake AI",
+getOAuthToken:cb=>cb(access_token)
+})
+
+player.addListener('ready',({device_id:id})=>{
+device_id=id
+log("Spotify Ready")
+})
+
+player.connect()
+
+}
+
+// ================= PLAY SONG =================
+
+async function playSong(query){
+
+const res=await fetch(
+"https://api.spotify.com/v1/search?q="+encodeURIComponent(query)+"&type=track&limit=1",
+{
+headers:{Authorization:"Bearer "+access_token}
+})
+
+const data=await res.json()
+
+const uri=data.tracks.items[0].uri
+
+await fetch(
+"https://api.spotify.com/v1/me/player/play?device_id="+device_id,
+{
+method:"PUT",
+headers:{
+Authorization:"Bearer "+access_token,
+"Content-Type":"application/json"
+},
+body:JSON.stringify({uris:[uri]})
+})
+
+}
+
+// ================= AI =================
+
+async function askAI(text){
+
+const res=await fetch("https://api.mistral.ai/v1/chat/completions",{
+
+method:"POST",
+headers:{
+Authorization:"Bearer "+MISTRAL_KEY,
+"Content-Type":"application/json"
+},
+
+body:JSON.stringify({
+
+model:"mistral-large-latest",
+
+messages:[
+{
+role:"system",
+content:`You control light and music.
+
+Only JSON.
+
+Light:
+{"type":"light","value":[r,g,b]}
+
+Music:
+{"type":"music","query":"song"}
+
+Question:
+{"type":"question","response":"text","speak":true}`
+},
+
+{role:"user",content:text}
+
+]
+
+})
+
+})
+
+let data=await res.json()
+let raw=data.choices[0].message.content
+
+raw=raw.replace(/```json/g,"").replace(/```/g,"").trim()
+
+const obj=JSON.parse(raw)
+
+handleAI(obj)
+
+}
+
+// ================= HANDLE =================
+
+function handleAI(obj){
+
+if(obj.type==="light"){
+setLight(...obj.value)
+}
+
+if(obj.type==="music"){
+playSong(obj.query)
+}
+
+if(obj.type==="question"){
+if(obj.speak){
+speechSynthesis.speak(new SpeechSynthesisUtterance(obj.response))
+}
+}
+
+}
+
+// ================= VOICE =================
+
+const rec=new (window.SpeechRecognition||window.webkitSpeechRecognition)()
+
+rec.continuous=true
+
+rec.onresult=e=>{
+
+let t=e.results[e.results.length-1][0].transcript.toLowerCase()
+
+log("HEARD "+t)
+
+if(t.includes("drake")){
+
+askAI(t)
+
+}
+
+}
+
+rec.onend=()=>rec.start()
+
+rec.start()
+
+</script>
+
+</body>
+</html>
+````
