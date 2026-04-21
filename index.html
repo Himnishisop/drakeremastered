@@ -1,242 +1,811 @@
-````html
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-<title>Drake Final Assistant</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Drake Remastered</title>
+  <style>
+    body{
+      margin:0;
+      background:#0f1115;
+      color:#fff;
+      font-family:Arial,Helvetica,sans-serif;
+    }
+    .topbar{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      padding:14px;
+      position:sticky;
+      top:0;
+      background:#151923;
+      z-index:10;
+      border-bottom:1px solid #2a3140;
+    }
+    button{
+      border:none;
+      padding:12px 16px;
+      border-radius:10px;
+      background:#2d6cdf;
+      color:#fff;
+      font-weight:700;
+      cursor:pointer;
+    }
+    button.secondary{
+      background:#2b2f3a;
+    }
+    #status{
+      padding:0 14px 12px;
+      color:#9fd3ff;
+      font-weight:700;
+    }
+    #debug{
+      margin:0 14px 14px;
+      padding:12px;
+      height:280px;
+      overflow:auto;
+      white-space:pre-wrap;
+      background:#000;
+      color:#00ff88;
+      border-radius:12px;
+      border:1px solid #243;
+      font-family:Consolas,monospace;
+      font-size:13px;
+    }
+    .info{
+      margin:0 14px 14px;
+      padding:14px;
+      background:#171b24;
+      border-radius:12px;
+      line-height:1.5;
+      color:#d5d9e3;
+    }
+    .badge{
+      display:inline-block;
+      padding:4px 8px;
+      border-radius:999px;
+      background:#222838;
+      margin-right:6px;
+      margin-bottom:6px;
+      font-size:12px;
+    }
+  </style>
 </head>
-
 <body>
 
-<button onclick="connectBLE()">CONNECT LIGHT</button>
-<button onclick="loginSpotify()">LOGIN SPOTIFY</button>
-
-<pre id="debug" style="background:black;color:#00ff00;height:200px;overflow:auto"></pre>
-
-<script src="https://sdk.scdn.co/spotify-player.js"></script>
-
-<script>
-
-// ================= CONFIG =================
-
-const MISTRAL_KEY = "sb4uBrl67jk1RV2gg1gLZqh2lkoSq3Py"
-const SPOTIFY_CLIENT_ID = "8ARNMqo7uXgU5NTweEmWn46Hvewjcp1PtqfXTKDZTj29";
-const REDIRECT_URI = "https://himnishisop.github.io/drakeremastered/";
-
-const DEVICE_NAME="CLK"
-const SERVICE_UUID="0000fff0-0000-1000-8000-00805f9b34fb"
-const CHAR_UUID="0000fff3-0000-1000-8000-00805f9b34fb"
-
-let char=null
-let access_token=null
-let player=null
-let device_id=null
-
-// ================= DEBUG =================
-
-function log(t){
-document.getElementById("debug").textContent+=t+"\n"
-}
-
-// ================= BLE =================
-
-function packet(r,g,b){
-return new Uint8Array([0x7e,0x07,0x05,0x03,r,g,b,0x10,0xef])
-}
-
-async function connectBLE(){
-
-const device=await navigator.bluetooth.requestDevice({
-filters:[{namePrefix:DEVICE_NAME}],
-optionalServices:[SERVICE_UUID]
-})
-
-const server=await device.gatt.connect()
-const service=await server.getPrimaryService(SERVICE_UUID)
-char=await service.getCharacteristic(CHAR_UUID)
-
-log("BLE CONNECTED")
-
-}
-
-async function setLight(r,g,b){
-
-if(!char) return
-
-await char.writeValueWithoutResponse(packet(r,g,b))
-
-}
-
-// ================= SPOTIFY LOGIN =================
-
-function loginSpotify(){
-
-const scope="streaming user-read-email user-read-private user-modify-playback-state"
-
-window.location =
-"https://accounts.spotify.com/authorize"+
-"?client_id="+SPOTIFY_CLIENT_ID+
-"&response_type=token"+
-"&redirect_uri="+encodeURIComponent(REDIRECT_URI)+
-"&scope="+encodeURIComponent(scope)
-
-}
-
-window.onload=()=>{
-
-if(window.location.hash){
-
-const hash=new URLSearchParams(window.location.hash.substring(1))
-access_token=hash.get("access_token")
-
-initSpotify()
-
-}
-
-}
-
-// ================= SPOTIFY PLAYER =================
-
-function initSpotify(){
-
-player=new Spotify.Player({
-name:"Drake AI",
-getOAuthToken:cb=>cb(access_token)
-})
-
-player.addListener('ready',({device_id:id})=>{
-device_id=id
-log("Spotify Ready")
-})
-
-player.connect()
-
-}
-
-// ================= PLAY SONG =================
-
-async function playSong(query){
-
-const res=await fetch(
-"https://api.spotify.com/v1/search?q="+encodeURIComponent(query)+"&type=track&limit=1",
-{
-headers:{Authorization:"Bearer "+access_token}
-})
-
-const data=await res.json()
-
-const uri=data.tracks.items[0].uri
-
-await fetch(
-"https://api.spotify.com/v1/me/player/play?device_id="+device_id,
-{
-method:"PUT",
-headers:{
-Authorization:"Bearer "+access_token,
-"Content-Type":"application/json"
-},
-body:JSON.stringify({uris:[uri]})
-})
-
-}
-
-// ================= AI =================
-
-async function askAI(text){
-
-const res=await fetch("https://api.mistral.ai/v1/chat/completions",{
-
-method:"POST",
-headers:{
-Authorization:"Bearer "+MISTRAL_KEY,
-"Content-Type":"application/json"
-},
-
-body:JSON.stringify({
-
-model:"mistral-large-latest",
-
-messages:[
-{
-role:"system",
-content:`You control light and music.
-
-Only JSON.
-
-Light:
-{"type":"light","value":[r,g,b]}
-
-Music:
-{"type":"music","query":"song"}
-
-Question:
-{"type":"question","response":"text","speak":true}`
-},
-
-{role:"user",content:text}
-
-]
-
-})
-
-})
-
-let data=await res.json()
-let raw=data.choices[0].message.content
-
-raw=raw.replace(/```json/g,"").replace(/```/g,"").trim()
-
-const obj=JSON.parse(raw)
-
-handleAI(obj)
-
-}
-
-// ================= HANDLE =================
-
-function handleAI(obj){
-
-if(obj.type==="light"){
-setLight(...obj.value)
-}
-
-if(obj.type==="music"){
-playSong(obj.query)
-}
-
-if(obj.type==="question"){
-if(obj.speak){
-speechSynthesis.speak(new SpeechSynthesisUtterance(obj.response))
-}
-}
-
-}
-
-// ================= VOICE =================
-
-const rec=new (window.SpeechRecognition||window.webkitSpeechRecognition)()
-
-rec.continuous=true
-
-rec.onresult=e=>{
-
-let t=e.results[e.results.length-1][0].transcript.toLowerCase()
-
-log("HEARD "+t)
-
-if(t.includes("drake")){
-
-askAI(t)
-
-}
-
-}
-
-rec.onend=()=>rec.start()
-
-rec.start()
-
-</script>
-
+  <div class="topbar">
+    <button onclick="connectBLE()">CONNECT LIGHT</button>
+    <button onclick="loginSpotify()">LOGIN SPOTIFY</button>
+    <button class="secondary" onclick="startVoice()">START VOICE</button>
+    <button class="secondary" onclick="stopVoice()">STOP VOICE</button>
+    <button class="secondary" onclick="testRed()">TEST RED</button>
+    <button class="secondary" onclick="pauseSong()">PAUSE</button>
+    <button class="secondary" onclick="resumeSong()">RESUME</button>
+    <button class="secondary" onclick="nextSong()">NEXT</button>
+    <button class="secondary" onclick="previousSong()">PREV</button>
+  </div>
+
+  <div id="status">idle</div>
+
+  <div class="info">
+    <span class="badge">Wake words: drake / drink / break / dark / dre</span>
+    <span class="badge">BLE device: CLK</span>
+    <span class="badge">Spotify redirect: GitHub Pages</span>
+    <div style="margin-top:10px">
+      Example commands:<br>
+      <b>Drake make light red</b><br>
+      <b>Drake set light blue</b><br>
+      <b>Drake brightness 30</b><br>
+      <b>Drake play sidhu moose wala</b><br>
+      <b>Drake pause music</b><br>
+      <b>Drake next song</b><br>
+      <b>Drake what is photosynthesis</b>
+    </div>
+  </div>
+
+  <pre id="debug"></pre>
+
+  <script src="https://sdk.scdn.co/spotify-player.js"></script>
+  <script>
+    // =========================
+    // CONFIG
+    // =========================
+    const MISTRAL_API_KEY = "sb4uBrl67jk1RV2gg1gLZqh2lkoSq3Py";
+    const SPOTIFY_CLIENT_ID = "8ARNMqo7uXgU5NTweEmWn46Hvewjcp1PtqfXTKDZTj29";
+    const REDIRECT_URI = "https://himnishisop.github.io/drakeremastered/";
+
+    const DEVICE_NAME = "CLK";
+    const SERVICE_UUID = "0000fff0-0000-1000-8000-00805f9b34fb";
+    const CHAR_UUID = "0000fff3-0000-1000-8000-00805f9b34fb";
+
+    const WAKE_WORDS = ["drake","drink","break","dark","dre"];
+
+    // =========================
+    // STATE
+    // =========================
+    let bleChar = null;
+    let bleDevice = null;
+
+    let recognition = null;
+    let voiceStarted = false;
+    let manuallyStoppedVoice = false;
+    let handlingSpeech = false;
+
+    let spotifyAccessToken = null;
+    let spotifyPlayer = null;
+    let spotifyDeviceId = null;
+
+    // =========================
+    // UI / DEBUG
+    // =========================
+    function log(msg){
+      const box = document.getElementById("debug");
+      box.textContent += `[${new Date().toLocaleTimeString()}] ${msg}\n`;
+      box.scrollTop = box.scrollHeight;
+      console.log(msg);
+    }
+
+    function setStatus(text){
+      document.getElementById("status").innerText = text;
+    }
+
+    window.onerror = function(message, source, lineno, colno){
+      log(`JS ERROR: ${message} @ ${lineno}:${colno}`);
+    };
+
+    // =========================
+    // BLE LIGHT
+    // =========================
+    function packet(r,g,b){
+      return new Uint8Array([0x7e,0x07,0x05,0x03,r,g,b,0x10,0xef]);
+    }
+
+    async function connectBLE(){
+      try{
+        setStatus("scanning BLE...");
+        log("Scanning BLE light...");
+
+        bleDevice = await navigator.bluetooth.requestDevice({
+          filters:[{ namePrefix: DEVICE_NAME }],
+          optionalServices:[SERVICE_UUID]
+        });
+
+        bleDevice.addEventListener("gattserverdisconnected", () => {
+          log("BLE disconnected");
+          bleChar = null;
+          setStatus("BLE disconnected");
+        });
+
+        const server = await bleDevice.gatt.connect();
+        const service = await server.getPrimaryService(SERVICE_UUID);
+        bleChar = await service.getCharacteristic(CHAR_UUID);
+
+        log("BLE connected");
+        setStatus("BLE connected");
+      }catch(e){
+        log("BLE ERROR: " + e);
+        setStatus("BLE error");
+      }
+    }
+
+    async function setLight(r,g,b){
+      if(!bleChar){
+        log("BLE not connected");
+        return;
+      }
+
+      r = Math.max(0, Math.min(255, Math.round(r)));
+      g = Math.max(0, Math.min(255, Math.round(g)));
+      b = Math.max(0, Math.min(255, Math.round(b)));
+
+      try{
+        if(typeof bleChar.writeValueWithoutResponse === "function"){
+          await bleChar.writeValueWithoutResponse(packet(r,g,b));
+        }else{
+          await bleChar.writeValue(packet(r,g,b));
+        }
+        log(`LIGHT -> ${r},${g},${b}`);
+      }catch(e){
+        log("BLE WRITE ERROR: " + e);
+      }
+    }
+
+    function testRed(){
+      setLight(255,0,0);
+    }
+
+    // =========================
+    // SPEECH OUTPUT
+    // =========================
+    function speak(text){
+      try{
+        window.speechSynthesis.cancel();
+        const u = new SpeechSynthesisUtterance(text);
+        u.lang = "en-US";
+        u.rate = 1;
+        window.speechSynthesis.speak(u);
+        log("SPEAK -> " + text);
+      }catch(e){
+        log("SPEAK ERROR: " + e);
+      }
+    }
+
+    // =========================
+    // WAKE WORD DETECTION
+    // =========================
+    function getWakeWord(text){
+      const t = text.toLowerCase();
+      for(const w of WAKE_WORDS){
+        if(t.includes(w)) return w;
+      }
+      return null;
+    }
+
+    // =========================
+    // VOICE INPUT
+    // =========================
+    function createRecognition(){
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if(!SR){
+        log("SpeechRecognition not supported in this browser");
+        setStatus("SpeechRecognition unsupported");
+        return null;
+      }
+
+      const rec = new SR();
+      rec.continuous = true;
+      rec.interimResults = false;
+      rec.lang = "en-US";
+
+      rec.onstart = () => {
+        log("VOICE ACTIVE");
+        setStatus("voice active");
+      };
+
+      rec.onresult = async (e) => {
+        try{
+          const text = e.results[e.results.length - 1][0].transcript.toLowerCase().trim();
+          log("HEARD -> " + text);
+
+          if(handlingSpeech) return;
+
+          const wake = getWakeWord(text);
+          if(!wake) return;
+
+          let command = text.replace(wake, "").trim();
+          if(!command){
+            speak("Yes?");
+            return;
+          }
+
+          handlingSpeech = true;
+          setStatus("AI thinking...");
+          await askAI(command);
+          setStatus("voice active");
+          handlingSpeech = false;
+        }catch(err){
+          handlingSpeech = false;
+          log("VOICE RESULT ERROR: " + err);
+        }
+      };
+
+      rec.onerror = (e) => {
+        log("VOICE ERROR: " + e.error);
+      };
+
+      rec.onend = () => {
+        log("VOICE ENDED");
+        if(!manuallyStoppedVoice){
+          try{
+            rec.start();
+            log("VOICE RESTART");
+          }catch(e){
+            log("VOICE RESTART ERROR: " + e);
+          }
+        }
+      };
+
+      return rec;
+    }
+
+    function startVoice(){
+      if(!recognition){
+        recognition = createRecognition();
+        if(!recognition) return;
+      }
+
+      manuallyStoppedVoice = false;
+
+      try{
+        recognition.start();
+        voiceStarted = true;
+      }catch(e){
+        log("VOICE START ERROR: " + e);
+      }
+    }
+
+    function stopVoice(){
+      manuallyStoppedVoice = true;
+      voiceStarted = false;
+      if(recognition){
+        try{
+          recognition.stop();
+        }catch(e){
+          log("VOICE STOP ERROR: " + e);
+        }
+      }
+      setStatus("voice stopped");
+    }
+
+    // =========================
+    // MISTRAL AI
+    // =========================
+    const SYSTEM_PROMPT = `
+You are Drake, a smart assistant that controls BLE RGB lights, Spotify music, and answers questions.
+
+VERY IMPORTANT RULES:
+- Reply ONLY with valid JSON.
+- No markdown.
+- No code block fences.
+- No explanation outside JSON.
+
+Supported outputs:
+
+1) Light color:
+{"type":"light","action":"color","value":[255,0,0]}
+
+2) Brightness:
+{"type":"light","action":"brightness","value":30}
+
+Brightness is 0 to 100.
+
+3) Music play:
+{"type":"music","action":"play","query":"song name"}
+
+4) Music pause:
+{"type":"music","action":"pause"}
+
+5) Music resume:
+{"type":"music","action":"resume"}
+
+6) Music next:
+{"type":"music","action":"next"}
+
+7) Music previous:
+{"type":"music","action":"previous"}
+
+8) Question answer:
+{"type":"question","response":"your answer","speak":true}
+
+9) Multiple actions:
+{"type":"combo","actions":[
+  {"type":"light","action":"color","value":[0,0,255]},
+  {"type":"music","action":"play","query":"lofi"}
+]}
+
+Behavior rules:
+- For questions, give short clean spoken answers.
+- For commands about red, blue, green, white, purple, yellow, cyan, pink, orange, return exact RGB.
+- For brightness requests, return 0-100.
+- If user says turn off light, return {"type":"light","action":"color","value":[0,0,0]}
+- If user says turn on light, prefer white at medium brightness.
+- If unclear, answer as a question response.
+`;
+
+    function cleanAIResponse(text){
+      return text
+        .replace(/```json/gi, "")
+        .replace(/```/g, "")
+        .trim();
+    }
+
+    async function askAI(userText){
+      log("AI ASK -> " + userText);
+
+      try{
+        const res = await fetch("https://api.mistral.ai/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Authorization": "Bearer " + MISTRAL_API_KEY,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            model: "mistral-large-latest",
+            messages: [
+              { role: "system", content: SYSTEM_PROMPT },
+              { role: "user", content: userText }
+            ],
+            temperature: 0.2
+          })
+        });
+
+        const data = await res.json();
+
+        if(!res.ok){
+          log("MISTRAL HTTP ERROR: " + res.status + " " + JSON.stringify(data));
+          return;
+        }
+
+        let raw = data?.choices?.[0]?.message?.content || "";
+        raw = cleanAIResponse(raw);
+        log("AI RAW -> " + raw);
+
+        const obj = JSON.parse(raw);
+        await handleAI(obj);
+      }catch(e){
+        log("AI ERROR: " + e);
+      }
+    }
+
+    async function handleAI(obj){
+      if(!obj || !obj.type){
+        log("AI returned invalid object");
+        return;
+      }
+
+      if(obj.type === "combo" && Array.isArray(obj.actions)){
+        for(const action of obj.actions){
+          await handleAI(action);
+        }
+        return;
+      }
+
+      if(obj.type === "light"){
+        if(obj.action === "color" && Array.isArray(obj.value) && obj.value.length === 3){
+          await setLight(obj.value[0], obj.value[1], obj.value[2]);
+          return;
+        }
+
+        if(obj.action === "brightness"){
+          const pct = Math.max(0, Math.min(100, Number(obj.value) || 0));
+          const v = Math.round((pct / 100) * 255);
+          await setLight(v, v, v);
+          return;
+        }
+      }
+
+      if(obj.type === "music"){
+        if(obj.action === "play" && obj.query){
+          await playSong(obj.query);
+          return;
+        }
+        if(obj.action === "pause"){
+          await pauseSong();
+          return;
+        }
+        if(obj.action === "resume"){
+          await resumeSong();
+          return;
+        }
+        if(obj.action === "next"){
+          await nextSong();
+          return;
+        }
+        if(obj.action === "previous"){
+          await previousSong();
+          return;
+        }
+      }
+
+      if(obj.type === "question"){
+        if(obj.response){
+          log("AI ANSWER -> " + obj.response);
+          if(obj.speak) speak(obj.response);
+        }
+        return;
+      }
+
+      log("Unhandled AI object: " + JSON.stringify(obj));
+    }
+
+    // =========================
+    // SPOTIFY PKCE LOGIN
+    // =========================
+    function randomString(length = 64) {
+      const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+      const bytes = new Uint8Array(length);
+      crypto.getRandomValues(bytes);
+      let out = "";
+      for (let i = 0; i < length; i++) out += chars[bytes[i] % chars.length];
+      return out;
+    }
+
+    async function sha256(text) {
+      const data = new TextEncoder().encode(text);
+      return await crypto.subtle.digest("SHA-256", data);
+    }
+
+    function base64url(buffer) {
+      return btoa(String.fromCharCode(...new Uint8Array(buffer)))
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/=+$/, "");
+    }
+
+    async function loginSpotify() {
+      try{
+        const verifier = randomString(64);
+        const challenge = base64url(await sha256(verifier));
+        const state = randomString(16);
+
+        localStorage.setItem("spotify_code_verifier", verifier);
+        localStorage.setItem("spotify_auth_state", state);
+
+        const scope = [
+          "streaming",
+          "user-read-email",
+          "user-read-private",
+          "user-modify-playback-state",
+          "user-read-playback-state"
+        ].join(" ");
+
+        const params = new URLSearchParams({
+          client_id: SPOTIFY_CLIENT_ID,
+          response_type: "code",
+          redirect_uri: REDIRECT_URI,
+          scope,
+          state,
+          code_challenge_method: "S256",
+          code_challenge: challenge,
+          show_dialog: "true"
+        });
+
+        const url = "https://accounts.spotify.com/authorize?" + params.toString();
+        log("Spotify login redirecting...");
+        window.location.href = url;
+      }catch(e){
+        log("SPOTIFY LOGIN ERROR: " + e);
+      }
+    }
+
+    async function exchangeCodeForToken(code) {
+      const verifier = localStorage.getItem("spotify_code_verifier");
+      if (!verifier) throw new Error("Missing PKCE code verifier");
+
+      const body = new URLSearchParams({
+        client_id: SPOTIFY_CLIENT_ID,
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: REDIRECT_URI,
+        code_verifier: verifier
+      });
+
+      const res = await fetch("https://accounts.spotify.com/api/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error_description || data.error || "Token exchange failed");
+      }
+
+      spotifyAccessToken = data.access_token;
+      localStorage.setItem("spotify_access_token", spotifyAccessToken);
+
+      if (data.refresh_token) {
+        localStorage.setItem("spotify_refresh_token", data.refresh_token);
+      }
+
+      log("Spotify token acquired");
+      setStatus("Spotify logged in");
+    }
+
+    async function refreshSpotifyToken() {
+      const refreshToken = localStorage.getItem("spotify_refresh_token");
+      if (!refreshToken) throw new Error("No refresh token found");
+
+      const body = new URLSearchParams({
+        client_id: SPOTIFY_CLIENT_ID,
+        grant_type: "refresh_token",
+        refresh_token: refreshToken
+      });
+
+      const res = await fetch("https://accounts.spotify.com/api/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error_description || data.error || "Refresh failed");
+      }
+
+      spotifyAccessToken = data.access_token;
+      localStorage.setItem("spotify_access_token", spotifyAccessToken);
+      log("Spotify token refreshed");
+    }
+
+    async function initSpotifyFromRedirect() {
+      const url = new URL(window.location.href);
+      const code = url.searchParams.get("code");
+      const returnedState = url.searchParams.get("state");
+      const savedState = localStorage.getItem("spotify_auth_state");
+
+      if (code) {
+        if (!returnedState || returnedState !== savedState) {
+          throw new Error("Spotify state mismatch");
+        }
+        await exchangeCodeForToken(code);
+        window.history.replaceState({}, document.title, REDIRECT_URI);
+      } else {
+        spotifyAccessToken = localStorage.getItem("spotify_access_token");
+      }
+    }
+
+    function initSpotifyPlayer() {
+      if (!window.Spotify) {
+        log("Spotify SDK not loaded");
+        return;
+      }
+
+      spotifyPlayer = new Spotify.Player({
+        name: "Drake AI",
+        getOAuthToken: async cb => {
+          try{
+            if (!spotifyAccessToken) await refreshSpotifyToken();
+            cb(spotifyAccessToken);
+          }catch(e){
+            log("Spotify token callback error: " + e.message);
+          }
+        },
+        volume: 0.7
+      });
+
+      spotifyPlayer.addListener("initialization_error", ({ message }) => log("Spotify init error: " + message));
+      spotifyPlayer.addListener("authentication_error", ({ message }) => log("Spotify auth error: " + message));
+      spotifyPlayer.addListener("account_error", ({ message }) => log("Spotify account error: " + message));
+      spotifyPlayer.addListener("playback_error", ({ message }) => log("Spotify playback error: " + message));
+
+      spotifyPlayer.addListener("ready", ({ device_id }) => {
+        spotifyDeviceId = device_id;
+        log("Spotify Ready: " + spotifyDeviceId);
+        setStatus("Spotify ready");
+      });
+
+      spotifyPlayer.addListener("not_ready", ({ device_id }) => {
+        log("Spotify device offline: " + device_id);
+      });
+
+      spotifyPlayer.connect();
+    }
+
+    async function spotifyApi(path, options = {}) {
+      if (!spotifyAccessToken) throw new Error("Spotify not logged in");
+
+      let res = await fetch("https://api.spotify.com/v1" + path, {
+        ...options,
+        headers: {
+          "Authorization": "Bearer " + spotifyAccessToken,
+          "Content-Type": "application/json",
+          ...(options.headers || {})
+        }
+      });
+
+      if (res.status === 401) {
+        await refreshSpotifyToken();
+        res = await fetch("https://api.spotify.com/v1" + path, {
+          ...options,
+          headers: {
+            "Authorization": "Bearer " + spotifyAccessToken,
+            "Content-Type": "application/json",
+            ...(options.headers || {})
+          }
+        });
+      }
+
+      return res;
+    }
+
+    async function playSong(query){
+      try{
+        if(!spotifyDeviceId){
+          log("Spotify device not ready yet");
+          return;
+        }
+
+        const searchRes = await spotifyApi(`/search?q=${encodeURIComponent(query)}&type=track&limit=1`);
+        const searchData = await searchRes.json();
+
+        if (!searchData.tracks || !searchData.tracks.items || !searchData.tracks.items.length) {
+          log("No song found for: " + query);
+          return;
+        }
+
+        const track = searchData.tracks.items[0];
+        const uri = track.uri;
+
+        const playRes = await spotifyApi(`/me/player/play?device_id=${encodeURIComponent(spotifyDeviceId)}`, {
+          method: "PUT",
+          body: JSON.stringify({ uris: [uri] })
+        });
+
+        if (!playRes.ok && playRes.status !== 204) {
+          const txt = await playRes.text();
+          log("Spotify play failed: " + txt);
+          return;
+        }
+
+        log(`PLAYING -> ${track.name} - ${track.artists.map(a => a.name).join(", ")}`);
+        setStatus("Playing music");
+      }catch(e){
+        log("PLAY SONG ERROR: " + e);
+      }
+    }
+
+    async function pauseSong(){
+      try{
+        if(!spotifyDeviceId) return;
+        const res = await spotifyApi(`/me/player/pause?device_id=${encodeURIComponent(spotifyDeviceId)}`, {
+          method: "PUT"
+        });
+        log("PAUSE STATUS -> " + res.status);
+      }catch(e){
+        log("PAUSE ERROR: " + e);
+      }
+    }
+
+    async function resumeSong(){
+      try{
+        if(!spotifyDeviceId) return;
+        const res = await spotifyApi(`/me/player/play?device_id=${encodeURIComponent(spotifyDeviceId)}`, {
+          method: "PUT"
+        });
+        log("RESUME STATUS -> " + res.status);
+      }catch(e){
+        log("RESUME ERROR: " + e);
+      }
+    }
+
+    async function nextSong(){
+      try{
+        if(!spotifyDeviceId) return;
+        const res = await spotifyApi(`/me/player/next?device_id=${encodeURIComponent(spotifyDeviceId)}`, {
+          method: "POST"
+        });
+        log("NEXT STATUS -> " + res.status);
+      }catch(e){
+        log("NEXT ERROR: " + e);
+      }
+    }
+
+    async function previousSong(){
+      try{
+        if(!spotifyDeviceId) return;
+        const res = await spotifyApi(`/me/player/previous?device_id=${encodeURIComponent(spotifyDeviceId)}`, {
+          method: "POST"
+        });
+        log("PREVIOUS STATUS -> " + res.status);
+      }catch(e){
+        log("PREVIOUS ERROR: " + e);
+      }
+    }
+
+    // =========================
+    // BOOT
+    // =========================
+    window.onSpotifyWebPlaybackSDKReady = async () => {
+      try{
+        await initSpotifyFromRedirect();
+        if(spotifyAccessToken){
+          initSpotifyPlayer();
+        }else{
+          log("Spotify not logged in yet");
+        }
+      }catch(e){
+        log("Spotify startup error: " + e.message);
+      }
+    };
+
+    window.addEventListener("load", () => {
+      log("Page loaded");
+      setStatus("ready");
+      startVoice();
+    });
+  </script>
 </body>
 </html>
-````
