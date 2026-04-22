@@ -1,640 +1,231 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Drake Remastered - Jamendo Strict</title>
-  <style>
-    body{
-      margin:0;
-      background:#0f1115;
-      color:#fff;
-      font-family:Arial,Helvetica,sans-serif;
-    }
-    .topbar{
-      display:flex;
-      gap:10px;
-      flex-wrap:wrap;
-      padding:14px;
-      position:sticky;
-      top:0;
-      background:#151923;
-      z-index:10;
-      border-bottom:1px solid #2a3140;
-    }
-    button{
-      border:none;
-      padding:12px 16px;
-      border-radius:10px;
-      background:#2d6cdf;
-      color:#fff;
-      font-weight:700;
-      cursor:pointer;
-    }
-    button.secondary{
-      background:#2b2f3a;
-    }
-    #status{
-      padding:0 14px 12px;
-      color:#9fd3ff;
-      font-weight:700;
-    }
-    #debug{
-      margin:0 14px 14px;
-      padding:12px;
-      height:280px;
-      overflow:auto;
-      white-space:pre-wrap;
-      background:#000;
-      color:#00ff88;
-      border-radius:12px;
-      border:1px solid #243;
-      font-family:Consolas,monospace;
-      font-size:13px;
-    }
-    .info{
-      margin:0 14px 14px;
-      padding:14px;
-      background:#171b24;
-      border-radius:12px;
-      line-height:1.5;
-      color:#d5d9e3;
-    }
-    .badge{
-      display:inline-block;
-      padding:4px 8px;
-      border-radius:999px;
-      background:#222838;
-      margin-right:6px;
-      margin-bottom:6px;
-      font-size:12px;
-    }
-    audio{
-      width:calc(100% - 28px);
-      margin:0 14px 14px;
-    }
-  </style>
+<meta charset="UTF-8">
+<title>Drake AI FINAL</title>
+
+<style>
+body{
+  background:#0f1115;
+  color:#fff;
+  font-family:Arial;
+}
+button{
+  padding:10px;
+  margin:5px;
+  border:none;
+  border-radius:8px;
+  background:#2d6cdf;
+  color:white;
+}
+#debug{
+  background:black;
+  color:#00ff88;
+  height:200px;
+  overflow:auto;
+  margin-top:10px;
+}
+</style>
 </head>
+
 <body>
 
-  <div class="topbar">
-    <button onclick="connectBLE()">CONNECT LIGHT</button>
-    <button class="secondary" onclick="startVoice()">START VOICE</button>
-    <button class="secondary" onclick="stopVoice()">STOP VOICE</button>
-    <button class="secondary" onclick="testRed()">TEST RED</button>
-    <button class="secondary" onclick="pauseMusic()">PAUSE MUSIC</button>
-    <button class="secondary" onclick="resumeMusic()">RESUME MUSIC</button>
-    <button class="secondary" onclick="stopMusic()">STOP MUSIC</button>
-  </div>
+<button onclick="connectBLE()">CONNECT LIGHT</button>
+<button onclick="startVoice()">START VOICE</button>
+<button onclick="arm()">ARM AUDIO</button>
 
-  <div id="status">idle</div>
+<div id="player"></div>
 
-  <div class="info">
-    <span class="badge">Wake words: drake / drink / break / dark / dre</span>
-    <span class="badge">BLE device: CLK</span>
-    <span class="badge">Music API: Jamendo strict match</span>
-    <div style="margin-top:10px">
-      Example commands:<br>
-      <b>Drake make light red</b><br>
-      <b>Drake brightness 30</b><br>
-      <b>Drake play jazz</b><br>
-      <b>Drake play relaxing piano</b><br>
-      <b>Drake play song by artist</b><br>
-      <b>Drake pause music</b><br>
-      <b>Drake resume music</b><br>
-      <b>Drake stop music</b><br>
-      <b>Drake what is photosynthesis</b>
-    </div>
-  </div>
+<pre id="debug"></pre>
 
-  <audio id="audioPlayer" controls preload="none"></audio>
+<script src="https://www.youtube.com/iframe_api"></script>
 
-  <pre id="debug"></pre>
+<script>
 
-  <script>
-    const MISTRAL_API_KEY = "sb4uBrl67jk1RV2gg1gLZqh2lkoSq3Py";
-    const JAMENDO_CLIENT_ID = "23dda0fa";
+// ================= CONFIG =================
+const MISTRAL_API_KEY = "sb4uBrl67jk1RV2gg1gLZqh2lkoSq3Py";
+const YT_API_KEY = "AIzaSyBW9ylko1FTzfvco2NShiRE4lkI29fP7tc";
 
-    const DEVICE_NAME = "CLK";
-    const SERVICE_UUID = "0000fff0-0000-1000-8000-00805f9b34fb";
-    const CHAR_UUID = "0000fff3-0000-1000-8000-00805f9b34fb";
+const DEVICE_NAME = "CLK";
+const CHAR_UUID = "0000fff3-0000-1000-8000-00805f9b34fb";
 
-    const WAKE_WORDS = ["drake","drink","break","dark","dre"];
+const WAKE = ["drake","drink","break","dre","dark"];
 
-    let bleChar = null;
-    let bleDevice = null;
+// ================= DEBUG =================
+function log(t){
+  let d=document.getElementById("debug");
+  d.textContent+=t+"\n";
+  d.scrollTop=d.scrollHeight;
+  console.log(t);
+}
 
-    let recognition = null;
-    let manuallyStoppedVoice = false;
-    let handlingSpeech = false;
+// ================= BLE =================
+let char;
 
-    let currentTrack = null;
-    const audioPlayer = document.getElementById("audioPlayer");
+function packet(r,g,b){
+  return new Uint8Array([0x7e,0x07,0x05,0x03,r,g,b,0x10,0xef]);
+}
 
-    function log(msg){
-      const box = document.getElementById("debug");
-      box.textContent += `[${new Date().toLocaleTimeString()}] ${msg}\n`;
-      box.scrollTop = box.scrollHeight;
-      console.log(msg);
+async function connectBLE(){
+  let dev=await navigator.bluetooth.requestDevice({
+    filters:[{namePrefix:DEVICE_NAME}],
+    optionalServices:["0000fff0-0000-1000-8000-00805f9b34fb"]
+  });
+
+  let server=await dev.gatt.connect();
+  let service=await server.getPrimaryService("0000fff0-0000-1000-8000-00805f9b34fb");
+  char=await service.getCharacteristic(CHAR_UUID);
+
+  log("BLE CONNECTED");
+}
+
+async function setLight(r,g,b){
+  if(!char) return;
+  await char.writeValue(packet(r,g,b));
+}
+
+// ================= YOUTUBE =================
+let player;
+let ready=false;
+let unlocked=false;
+
+function onYouTubeIframeAPIReady(){
+  player=new YT.Player("player",{
+    height:"0",
+    width:"0",
+    videoId:"",
+    playerVars:{autoplay:1},
+    events:{
+      onReady:()=>{ready=true;log("YT READY");}
     }
+  });
+}
+window.onYouTubeIframeAPIReady=onYouTubeIframeAPIReady;
 
-    function setStatus(text){
-      document.getElementById("status").innerText = text;
-    }
-
-    window.onerror = function(message, source, lineno, colno){
-      log(`JS ERROR: ${message} @ ${lineno}:${colno}`);
-    };
-
-    function packet(r,g,b){
-      return new Uint8Array([0x7e,0x07,0x05,0x03,r,g,b,0x10,0xef]);
-    }
-
-    async function connectBLE(){
-      try{
-        setStatus("scanning BLE...");
-        log("Scanning BLE light...");
-
-        bleDevice = await navigator.bluetooth.requestDevice({
-          filters:[{ namePrefix: DEVICE_NAME }],
-          optionalServices:[SERVICE_UUID]
-        });
-
-        bleDevice.addEventListener("gattserverdisconnected", () => {
-          log("BLE disconnected");
-          bleChar = null;
-          setStatus("BLE disconnected");
-        });
-
-        const server = await bleDevice.gatt.connect();
-        const service = await server.getPrimaryService(SERVICE_UUID);
-        bleChar = await service.getCharacteristic(CHAR_UUID);
-
-        log("BLE connected");
-        setStatus("BLE connected");
-      }catch(e){
-        log("BLE ERROR: " + e);
-        setStatus("BLE error");
-      }
-    }
-
-    async function setLight(r,g,b){
-      if(!bleChar){
-        log("BLE not connected");
-        return;
-      }
-
-      r = Math.max(0, Math.min(255, Math.round(r)));
-      g = Math.max(0, Math.min(255, Math.round(g)));
-      b = Math.max(0, Math.min(255, Math.round(b)));
-
-      try{
-        if(typeof bleChar.writeValueWithoutResponse === "function"){
-          await bleChar.writeValueWithoutResponse(packet(r,g,b));
-        }else{
-          await bleChar.writeValue(packet(r,g,b));
-        }
-        log(`LIGHT -> ${r},${g},${b}`);
-      }catch(e){
-        log("BLE WRITE ERROR: " + e);
-      }
-    }
-
-    function testRed(){
-      setLight(255,0,0);
-    }
-
-    function speak(text){
-      try{
-        speechSynthesis.cancel();
-        const u = new SpeechSynthesisUtterance(text);
-        u.lang = "en-US";
-        u.rate = 1;
-        speechSynthesis.speak(u);
-        log("SPEAK -> " + text);
-      }catch(e){
-        log("SPEAK ERROR: " + e);
-      }
-    }
-
-    function getWakeWord(text){
-      const t = text.toLowerCase();
-      for(const w of WAKE_WORDS){
-        if(t.includes(w)) return w;
-      }
-      return null;
-    }
-
-    function createRecognition(){
-      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-      if(!SR){
-        log("SpeechRecognition not supported in this browser");
-        setStatus("SpeechRecognition unsupported");
-        return null;
-      }
-
-      const rec = new SR();
-      rec.continuous = true;
-      rec.interimResults = false;
-      rec.lang = "en-US";
-
-      rec.onstart = () => {
-        log("VOICE ACTIVE");
-        setStatus("voice active");
-      };
-
-      rec.onresult = async (e) => {
-        try{
-          const text = e.results[e.results.length - 1][0].transcript.toLowerCase().trim();
-          log("HEARD -> " + text);
-
-          if(handlingSpeech) return;
-
-          const wake = getWakeWord(text);
-          if(!wake) return;
-
-          const command = text.replace(wake, "").trim();
-
-          if(!command){
-            speak("Yes?");
-            return;
-          }
-
-          handlingSpeech = true;
-          setStatus("AI thinking...");
-          await askAI(command);
-          setStatus("voice active");
-          handlingSpeech = false;
-        }catch(err){
-          handlingSpeech = false;
-          log("VOICE RESULT ERROR: " + err);
-        }
-      };
-
-      rec.onerror = (e) => {
-        log("VOICE ERROR: " + e.error);
-      };
-
-      rec.onend = () => {
-        log("VOICE ENDED");
-        if(!manuallyStoppedVoice){
-          try{
-            rec.start();
-            log("VOICE RESTART");
-          }catch(e){
-            log("VOICE RESTART ERROR: " + e);
-          }
-        }
-      };
-
-      return rec;
-    }
-
-    function startVoice(){
-      if(!recognition){
-        recognition = createRecognition();
-        if(!recognition) return;
-      }
-
-      manuallyStoppedVoice = false;
-
-      try{
-        recognition.start();
-      }catch(e){
-        log("VOICE START ERROR: " + e);
-      }
-    }
-
-    function stopVoice(){
-      manuallyStoppedVoice = true;
-      if(recognition){
-        try{
-          recognition.stop();
-        }catch(e){
-          log("VOICE STOP ERROR: " + e);
-        }
-      }
-      setStatus("voice stopped");
-    }
-
-    function normalizeText(s){
-      return (s || "")
-        .toLowerCase()
-        .replace(/['’"]/g, "")
-        .replace(/[^a-z0-9\s]/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
-    }
-
-    function splitSongAndArtist(query){
-      const q = query.trim();
-      const byMatch = q.match(/(.+?)\s+by\s+(.+)/i);
-
-      if(byMatch){
-        return {
-          title: byMatch[1].trim(),
-          artist: byMatch[2].trim()
-        };
-      }
-
-      return {
-        title: q,
-        artist: ""
-      };
-    }
-
-    function scoreTrack(track, wantedTitle, wantedArtist){
-      const trackName = normalizeText(track.name);
-      const artistName = normalizeText(track.artist_name);
-
-      const title = normalizeText(wantedTitle);
-      const artist = normalizeText(wantedArtist);
-
-      let score = 0;
-
-      if(trackName === title) score += 120;
-      if(trackName.includes(title) || title.includes(trackName)) score += 70;
-
-      const titleWords = title.split(" ").filter(Boolean);
-      for(const w of titleWords){
-        if(trackName.includes(w)) score += 8;
-      }
-
-      if(artist){
-        if(artistName === artist) score += 120;
-        if(artistName.includes(artist) || artist.includes(artistName)) score += 70;
-
-        const artistWords = artist.split(" ").filter(Boolean);
-        for(const w of artistWords){
-          if(artistName.includes(w)) score += 10;
-        }
-      }
-
-      return score;
-    }
-
-    async function searchJamendoTrack(query){
-      const { title, artist } = splitSongAndArtist(query);
-
-      let url =
-        "https://api.jamendo.com/v3.0/tracks/?" +
-        "client_id=" + encodeURIComponent(JAMENDO_CLIENT_ID) +
-        "&format=json" +
-        "&limit=5" +
-        "&audioformat=mp31";
-
-      if(artist){
-        url += "&namesearch=" + encodeURIComponent(title);
-        url += "&artist_name=" + encodeURIComponent(artist);
-      }else{
-        url += "&namesearch=" + encodeURIComponent(title);
-      }
-
-      const res = await fetch(url);
-      const data = await res.json();
-
-      if(!res.ok){
-        throw new Error("Jamendo HTTP " + res.status);
-      }
-
-      if(data.headers?.status !== "success"){
-        throw new Error(data.headers?.error_message || "Jamendo API error");
-      }
-
-      if(!data.results || !data.results.length){
-        throw new Error("No track found");
-      }
-
-      let best = null;
-      let bestScore = -1;
-
-      for(const track of data.results){
-        const s = scoreTrack(track, title, artist);
-        log(`CANDIDATE -> ${track.name} - ${track.artist_name} | score=${s}`);
-        if(s > bestScore){
-          bestScore = s;
-          best = track;
-        }
-      }
-
-      if(!best || bestScore < (artist ? 120 : 70)){
-        throw new Error("No close Jamendo match");
-      }
-
-      return best;
-    }
-
-    async function playMusic(query){
-      try{
-        setStatus("Searching music...");
-        const track = await searchJamendoTrack(query);
-
-        if(!track.audio){
-          throw new Error("Track has no stream url");
-        }
-
-        currentTrack = track;
-        audioPlayer.src = track.audio;
-        await audioPlayer.play();
-
-        log(`JAMENDO PLAY -> ${track.name} - ${track.artist_name}`);
-        setStatus("Playing music");
-      }catch(e){
-        log("JAMENDO PLAY ERROR: " + e.message);
-        speak("Ye gaana Jamendo pe nahi mila");
-      }
-    }
-
-    function pauseMusic(){
-      try{
-        audioPlayer.pause();
-        log("JAMENDO PAUSE");
-      }catch(e){
-        log("PAUSE ERROR: " + e);
-      }
-    }
-
-    function resumeMusic(){
-      try{
-        audioPlayer.play();
-        log("JAMENDO RESUME");
-      }catch(e){
-        log("RESUME ERROR: " + e);
-      }
-    }
-
-    function stopMusic(){
-      try{
-        audioPlayer.pause();
-        audioPlayer.currentTime = 0;
-        log("JAMENDO STOP");
-      }catch(e){
-        log("STOP ERROR: " + e);
-      }
-    }
-
-    audioPlayer.onplay = () => log("AUDIO PLAYING");
-    audioPlayer.onpause = () => log("AUDIO PAUSED");
-    audioPlayer.onerror = () => log("AUDIO ELEMENT ERROR");
-
-    const SYSTEM_PROMPT = `
-You are Drake, a smart assistant that controls BLE RGB lights, Jamendo music, and answers questions.
-
-VERY IMPORTANT RULES:
-- Reply ONLY with valid JSON.
-- No markdown.
-- No code block fences.
-- No explanation outside JSON.
-
-Supported outputs:
-
-1) Light color:
-{"type":"light","action":"color","value":[255,0,0]}
-
-2) Brightness:
-{"type":"light","action":"brightness","value":30}
-
-Brightness is 0 to 100.
-
-3) Music play:
-{"type":"music","action":"play","query":"song name or genre"}
-
-4) Music pause:
-{"type":"music","action":"pause"}
-
-5) Music resume:
-{"type":"music","action":"resume"}
-
-6) Music stop:
-{"type":"music","action":"stop"}
-
-7) Question answer:
-{"type":"question","response":"your answer","speak":true}
-
-8) Multiple actions:
-{"type":"combo","actions":[
-  {"type":"light","action":"color","value":[0,0,255]},
-  {"type":"music","action":"play","query":"jazz"}
-]}
-
-Behavior rules:
-- For questions, give short clean spoken answers.
-- For commands about red, blue, green, white, purple, yellow, cyan, pink, orange, return exact RGB.
-- For brightness requests, return 0-100.
-- If user says turn off light, return {"type":"light","action":"color","value":[0,0,0]}
-- If user says turn on light, prefer white at medium brightness.
-- Keep the exact song title and artist in the query.
-- If user says "song by artist", preserve that exact format in the music query.
-- If unclear, answer as a question response.
+async function playMusic(q){
+  if(!unlocked){
+    speak("Click arm audio first");
+    return;
+  }
+
+  log("SEARCH "+q);
+
+  let url=`https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=1&q=${encodeURIComponent(q)}&key=${YT_API_KEY}`;
+
+  let res=await fetch(url);
+  let data=await res.json();
+
+  if(!data.items.length){
+    speak("Song nahi mila");
+    return;
+  }
+
+  let id=data.items[0].id.videoId;
+  let title=data.items[0].snippet.title;
+
+  log("PLAY "+title);
+
+  player.loadVideoById(id);
+  player.playVideo();
+}
+
+function pauseMusic(){player.pauseVideo();}
+function resumeMusic(){player.playVideo();}
+
+// ================= ARM =================
+function arm(){
+  unlocked=true;
+  log("AUDIO ARMED");
+}
+
+// ================= SPEAK =================
+function speak(t){
+  let u=new SpeechSynthesisUtterance(t);
+  speechSynthesis.speak(u);
+}
+
+// ================= VOICE =================
+let rec;
+
+function startVoice(){
+  let SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  rec=new SR();
+  rec.continuous=true;
+
+  rec.onresult=async(e)=>{
+    let text=e.results[e.results.length-1][0].transcript.toLowerCase();
+    log("HEARD "+text);
+
+    let wake=WAKE.find(w=>text.includes(w));
+    if(!wake) return;
+
+    let cmd=text.replace(wake,"").trim();
+
+    await askAI(cmd);
+  };
+
+  rec.start();
+}
+
+// ================= AI =================
+const PROMPT = `
+Reply ONLY JSON.
+
+Music:
+{"type":"music","action":"play","query":"song"}
+
+Light:
+{"type":"light","value":[255,0,0]}
+
+Question:
+{"type":"question","response":"text"}
 `;
 
-    function cleanAIResponse(text){
-      return text
-        .replace(/```json/gi, "")
-        .replace(/```/g, "")
-        .trim();
-    }
+async function askAI(q){
+  log("AI "+q);
 
-    async function askAI(userText){
-      log("AI ASK -> " + userText);
+  let res=await fetch("https://api.mistral.ai/v1/chat/completions",{
+    method:"POST",
+    headers:{
+      "Authorization":"Bearer "+MISTRAL_API_KEY,
+      "Content-Type":"application/json"
+    },
+    body:JSON.stringify({
+      model:"mistral-large-latest",
+      messages:[
+        {role:"system",content:PROMPT},
+        {role:"user",content:q}
+      ]
+    })
+  });
 
-      try{
-        const res = await fetch("https://api.mistral.ai/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Authorization": "Bearer " + MISTRAL_API_KEY,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            model: "mistral-large-latest",
-            messages: [
-              { role: "system", content: SYSTEM_PROMPT },
-              { role: "user", content: userText }
-            ],
-            temperature: 0.2
-          })
-        });
+  let data=await res.json();
+  let raw=data.choices[0].message.content.replace(/```/g,"").trim();
 
-        const data = await res.json();
+  log("RAW "+raw);
 
-        if(!res.ok){
-          log("MISTRAL HTTP ERROR: " + res.status + " " + JSON.stringify(data));
-          return;
-        }
+  let obj=JSON.parse(raw);
 
-        let raw = data?.choices?.[0]?.message?.content || "";
-        raw = cleanAIResponse(raw);
-        log("AI RAW -> " + raw);
+  handle(obj);
+}
 
-        const obj = JSON.parse(raw);
-        await handleAI(obj);
-      }catch(e){
-        log("AI ERROR: " + e);
-      }
-    }
+// ================= HANDLE =================
+function handle(o){
 
-    async function handleAI(obj){
-      if(!obj || !obj.type){
-        log("AI returned invalid object");
-        return;
-      }
+  if(o.type==="music"){
+    playMusic(o.query);
+  }
 
-      if(obj.type === "combo" && Array.isArray(obj.actions)){
-        for(const action of obj.actions){
-          await handleAI(action);
-        }
-        return;
-      }
+  if(o.type==="light"){
+    setLight(o.value[0],o.value[1],o.value[2]);
+  }
 
-      if(obj.type === "light"){
-        if(obj.action === "color" && Array.isArray(obj.value) && obj.value.length === 3){
-          await setLight(obj.value[0], obj.value[1], obj.value[2]);
-          return;
-        }
+  if(o.type==="question"){
+    speak(o.response);
+  }
+}
 
-        if(obj.action === "brightness"){
-          const pct = Math.max(0, Math.min(100, Number(obj.value) || 0));
-          const v = Math.round((pct / 100) * 255);
-          await setLight(v, v, v);
-          return;
-        }
-      }
+</script>
 
-      if(obj.type === "music"){
-        if(obj.action === "play" && obj.query){
-          await playMusic(obj.query);
-          return;
-        }
-        if(obj.action === "pause"){
-          pauseMusic();
-          return;
-        }
-        if(obj.action === "resume"){
-          resumeMusic();
-          return;
-        }
-        if(obj.action === "stop"){
-          stopMusic();
-          return;
-        }
-      }
-
-      if(obj.type === "question"){
-        if(obj.response){
-          log("AI ANSWER -> " + obj.response);
-          if(obj.speak) speak(obj.response);
-        }
-        return;
-      }
-
-      log("Unhandled AI object: " + JSON.stringify(obj));
-    }
-
-    window.addEventListener("load", () => {
-      log("Page loaded");
-      setStatus("ready");
-      startVoice();
-    });
-  </script>
 </body>
 </html>
