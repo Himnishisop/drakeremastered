@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Drake Remastered</title>
+  <title>Drake Remastered - Jamendo</title>
   <style>
     body{
       margin:0;
@@ -69,20 +69,22 @@
       margin-bottom:6px;
       font-size:12px;
     }
+    audio{
+      width:calc(100% - 28px);
+      margin:0 14px 14px;
+    }
   </style>
 </head>
 <body>
 
   <div class="topbar">
     <button onclick="connectBLE()">CONNECT LIGHT</button>
-    <button onclick="loginSpotify()">LOGIN SPOTIFY</button>
     <button class="secondary" onclick="startVoice()">START VOICE</button>
     <button class="secondary" onclick="stopVoice()">STOP VOICE</button>
     <button class="secondary" onclick="testRed()">TEST RED</button>
-    <button class="secondary" onclick="pauseSong()">PAUSE</button>
-    <button class="secondary" onclick="resumeSong()">RESUME</button>
-    <button class="secondary" onclick="nextSong()">NEXT</button>
-    <button class="secondary" onclick="previousSong()">PREV</button>
+    <button class="secondary" onclick="pauseMusic()">PAUSE MUSIC</button>
+    <button class="secondary" onclick="resumeMusic()">RESUME MUSIC</button>
+    <button class="secondary" onclick="stopMusic()">STOP MUSIC</button>
   </div>
 
   <div id="status">idle</div>
@@ -90,29 +92,30 @@
   <div class="info">
     <span class="badge">Wake words: drake / drink / break / dark / dre</span>
     <span class="badge">BLE device: CLK</span>
-    <span class="badge">Spotify redirect: GitHub Pages</span>
+    <span class="badge">Music API: Jamendo</span>
     <div style="margin-top:10px">
       Example commands:<br>
       <b>Drake make light red</b><br>
-      <b>Drake set light blue</b><br>
       <b>Drake brightness 30</b><br>
-      <b>Drake play sidhu moose wala</b><br>
+      <b>Drake play jazz</b><br>
+      <b>Drake play relaxing piano</b><br>
       <b>Drake pause music</b><br>
-      <b>Drake next song</b><br>
+      <b>Drake resume music</b><br>
+      <b>Drake stop music</b><br>
       <b>Drake what is photosynthesis</b>
     </div>
   </div>
 
+  <audio id="audioPlayer" controls preload="none"></audio>
+
   <pre id="debug"></pre>
 
-  <script src="https://sdk.scdn.co/spotify-player.js"></script>
   <script>
     // =========================
     // CONFIG
     // =========================
     const MISTRAL_API_KEY = "sb4uBrl67jk1RV2gg1gLZqh2lkoSq3Py";
-    const SPOTIFY_CLIENT_ID = "8ARNMqo7uXgU5NTweEmWn46Hvewjcp1PtqfXTKDZTj29";
-    const REDIRECT_URI = "https://himnishisop.github.io/drakeremastered/";
+    const JAMENDO_CLIENT_ID = "23dda0fa";
 
     const DEVICE_NAME = "CLK";
     const SERVICE_UUID = "0000fff0-0000-1000-8000-00805f9b34fb";
@@ -127,13 +130,12 @@
     let bleDevice = null;
 
     let recognition = null;
-    let voiceStarted = false;
     let manuallyStoppedVoice = false;
     let handlingSpeech = false;
 
-    let spotifyAccessToken = null;
-    let spotifyPlayer = null;
-    let spotifyDeviceId = null;
+    let currentTrack = null;
+
+    const audioPlayer = document.getElementById("audioPlayer");
 
     // =========================
     // UI / DEBUG
@@ -215,15 +217,15 @@
     }
 
     // =========================
-    // SPEECH OUTPUT
+    // SPEAK
     // =========================
     function speak(text){
       try{
-        window.speechSynthesis.cancel();
+        speechSynthesis.cancel();
         const u = new SpeechSynthesisUtterance(text);
         u.lang = "en-US";
         u.rate = 1;
-        window.speechSynthesis.speak(u);
+        speechSynthesis.speak(u);
         log("SPEAK -> " + text);
       }catch(e){
         log("SPEAK ERROR: " + e);
@@ -231,7 +233,7 @@
     }
 
     // =========================
-    // WAKE WORD DETECTION
+    // WAKE WORDS
     // =========================
     function getWakeWord(text){
       const t = text.toLowerCase();
@@ -272,7 +274,8 @@
           const wake = getWakeWord(text);
           if(!wake) return;
 
-          let command = text.replace(wake, "").trim();
+          const command = text.replace(wake, "").trim();
+
           if(!command){
             speak("Yes?");
             return;
@@ -318,7 +321,6 @@
 
       try{
         recognition.start();
-        voiceStarted = true;
       }catch(e){
         log("VOICE START ERROR: " + e);
       }
@@ -326,7 +328,6 @@
 
     function stopVoice(){
       manuallyStoppedVoice = true;
-      voiceStarted = false;
       if(recognition){
         try{
           recognition.stop();
@@ -338,10 +339,93 @@
     }
 
     // =========================
-    // MISTRAL AI
+    // JAMENDO MUSIC
+    // =========================
+    async function searchJamendoTrack(query){
+      const url =
+        "https://api.jamendo.com/v3.0/tracks/?" +
+        "client_id=" + encodeURIComponent(JAMENDO_CLIENT_ID) +
+        "&format=json" +
+        "&limit=1" +
+        "&audioformat=mp31" +
+        "&search=" + encodeURIComponent(query);
+
+      const res = await fetch(url);
+      const data = await res.json();
+
+      if(!res.ok){
+        throw new Error("Jamendo HTTP " + res.status);
+      }
+
+      if(data.headers?.status !== "success"){
+        throw new Error(data.headers?.error_message || "Jamendo API error");
+      }
+
+      if(!data.results || !data.results.length){
+        throw new Error("No track found");
+      }
+
+      return data.results[0];
+    }
+
+    async function playMusic(query){
+      try{
+        setStatus("Searching music...");
+        const track = await searchJamendoTrack(query);
+
+        if(!track.audio){
+          throw new Error("Track has no stream url");
+        }
+
+        currentTrack = track;
+        audioPlayer.src = track.audio;
+        audioPlayer.play();
+
+        log(`JAMENDO PLAY -> ${track.name} - ${track.artist_name}`);
+        setStatus("Playing music");
+      }catch(e){
+        log("JAMENDO PLAY ERROR: " + e);
+        speak("Song nahi mila");
+      }
+    }
+
+    function pauseMusic(){
+      try{
+        audioPlayer.pause();
+        log("JAMENDO PAUSE");
+      }catch(e){
+        log("PAUSE ERROR: " + e);
+      }
+    }
+
+    function resumeMusic(){
+      try{
+        audioPlayer.play();
+        log("JAMENDO RESUME");
+      }catch(e){
+        log("RESUME ERROR: " + e);
+      }
+    }
+
+    function stopMusic(){
+      try{
+        audioPlayer.pause();
+        audioPlayer.currentTime = 0;
+        log("JAMENDO STOP");
+      }catch(e){
+        log("STOP ERROR: " + e);
+      }
+    }
+
+    audioPlayer.onplay = () => log("AUDIO PLAYING");
+    audioPlayer.onpause = () => log("AUDIO PAUSED");
+    audioPlayer.onerror = () => log("AUDIO ELEMENT ERROR");
+
+    // =========================
+    // AI
     // =========================
     const SYSTEM_PROMPT = `
-You are Drake, a smart assistant that controls BLE RGB lights, Spotify music, and answers questions.
+You are Drake, a smart assistant that controls BLE RGB lights, Jamendo music, and answers questions.
 
 VERY IMPORTANT RULES:
 - Reply ONLY with valid JSON.
@@ -360,7 +444,7 @@ Supported outputs:
 Brightness is 0 to 100.
 
 3) Music play:
-{"type":"music","action":"play","query":"song name"}
+{"type":"music","action":"play","query":"song name or genre"}
 
 4) Music pause:
 {"type":"music","action":"pause"}
@@ -368,19 +452,16 @@ Brightness is 0 to 100.
 5) Music resume:
 {"type":"music","action":"resume"}
 
-6) Music next:
-{"type":"music","action":"next"}
+6) Music stop:
+{"type":"music","action":"stop"}
 
-7) Music previous:
-{"type":"music","action":"previous"}
-
-8) Question answer:
+7) Question answer:
 {"type":"question","response":"your answer","speak":true}
 
-9) Multiple actions:
+8) Multiple actions:
 {"type":"combo","actions":[
   {"type":"light","action":"color","value":[0,0,255]},
-  {"type":"music","action":"play","query":"lofi"}
+  {"type":"music","action":"play","query":"jazz"}
 ]}
 
 Behavior rules:
@@ -466,23 +547,19 @@ Behavior rules:
 
       if(obj.type === "music"){
         if(obj.action === "play" && obj.query){
-          await playSong(obj.query);
+          await playMusic(obj.query);
           return;
         }
         if(obj.action === "pause"){
-          await pauseSong();
+          pauseMusic();
           return;
         }
         if(obj.action === "resume"){
-          await resumeSong();
+          resumeMusic();
           return;
         }
-        if(obj.action === "next"){
-          await nextSong();
-          return;
-        }
-        if(obj.action === "previous"){
-          await previousSong();
+        if(obj.action === "stop"){
+          stopMusic();
           return;
         }
       }
@@ -499,308 +576,8 @@ Behavior rules:
     }
 
     // =========================
-    // SPOTIFY PKCE LOGIN
-    // =========================
-    function randomString(length = 64) {
-      const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-      const bytes = new Uint8Array(length);
-      crypto.getRandomValues(bytes);
-      let out = "";
-      for (let i = 0; i < length; i++) out += chars[bytes[i] % chars.length];
-      return out;
-    }
-
-    async function sha256(text) {
-      const data = new TextEncoder().encode(text);
-      return await crypto.subtle.digest("SHA-256", data);
-    }
-
-    function base64url(buffer) {
-      return btoa(String.fromCharCode(...new Uint8Array(buffer)))
-        .replace(/\+/g, "-")
-        .replace(/\//g, "_")
-        .replace(/=+$/, "");
-    }
-
-    async function loginSpotify() {
-      try{
-        const verifier = randomString(64);
-        const challenge = base64url(await sha256(verifier));
-        const state = randomString(16);
-
-        localStorage.setItem("spotify_code_verifier", verifier);
-        localStorage.setItem("spotify_auth_state", state);
-
-        const scope = [
-          "streaming",
-          "user-read-email",
-          "user-read-private",
-          "user-modify-playback-state",
-          "user-read-playback-state"
-        ].join(" ");
-
-        const params = new URLSearchParams({
-          client_id: SPOTIFY_CLIENT_ID,
-          response_type: "code",
-          redirect_uri: REDIRECT_URI,
-          scope,
-          state,
-          code_challenge_method: "S256",
-          code_challenge: challenge,
-          show_dialog: "true"
-        });
-
-        const url = "https://accounts.spotify.com/authorize?" + params.toString();
-        log("Spotify login redirecting...");
-        window.location.href = url;
-      }catch(e){
-        log("SPOTIFY LOGIN ERROR: " + e);
-      }
-    }
-
-    async function exchangeCodeForToken(code) {
-      const verifier = localStorage.getItem("spotify_code_verifier");
-      if (!verifier) throw new Error("Missing PKCE code verifier");
-
-      const body = new URLSearchParams({
-        client_id: SPOTIFY_CLIENT_ID,
-        grant_type: "authorization_code",
-        code,
-        redirect_uri: REDIRECT_URI,
-        code_verifier: verifier
-      });
-
-      const res = await fetch("https://accounts.spotify.com/api/token", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error_description || data.error || "Token exchange failed");
-      }
-
-      spotifyAccessToken = data.access_token;
-      localStorage.setItem("spotify_access_token", spotifyAccessToken);
-
-      if (data.refresh_token) {
-        localStorage.setItem("spotify_refresh_token", data.refresh_token);
-      }
-
-      log("Spotify token acquired");
-      setStatus("Spotify logged in");
-    }
-
-    async function refreshSpotifyToken() {
-      const refreshToken = localStorage.getItem("spotify_refresh_token");
-      if (!refreshToken) throw new Error("No refresh token found");
-
-      const body = new URLSearchParams({
-        client_id: SPOTIFY_CLIENT_ID,
-        grant_type: "refresh_token",
-        refresh_token: refreshToken
-      });
-
-      const res = await fetch("https://accounts.spotify.com/api/token", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error_description || data.error || "Refresh failed");
-      }
-
-      spotifyAccessToken = data.access_token;
-      localStorage.setItem("spotify_access_token", spotifyAccessToken);
-      log("Spotify token refreshed");
-    }
-
-    async function initSpotifyFromRedirect() {
-      const url = new URL(window.location.href);
-      const code = url.searchParams.get("code");
-      const returnedState = url.searchParams.get("state");
-      const savedState = localStorage.getItem("spotify_auth_state");
-
-      if (code) {
-        if (!returnedState || returnedState !== savedState) {
-          throw new Error("Spotify state mismatch");
-        }
-        await exchangeCodeForToken(code);
-        window.history.replaceState({}, document.title, REDIRECT_URI);
-      } else {
-        spotifyAccessToken = localStorage.getItem("spotify_access_token");
-      }
-    }
-
-    function initSpotifyPlayer() {
-      if (!window.Spotify) {
-        log("Spotify SDK not loaded");
-        return;
-      }
-
-      spotifyPlayer = new Spotify.Player({
-        name: "Drake AI",
-        getOAuthToken: async cb => {
-          try{
-            if (!spotifyAccessToken) await refreshSpotifyToken();
-            cb(spotifyAccessToken);
-          }catch(e){
-            log("Spotify token callback error: " + e.message);
-          }
-        },
-        volume: 0.7
-      });
-
-      spotifyPlayer.addListener("initialization_error", ({ message }) => log("Spotify init error: " + message));
-      spotifyPlayer.addListener("authentication_error", ({ message }) => log("Spotify auth error: " + message));
-      spotifyPlayer.addListener("account_error", ({ message }) => log("Spotify account error: " + message));
-      spotifyPlayer.addListener("playback_error", ({ message }) => log("Spotify playback error: " + message));
-
-      spotifyPlayer.addListener("ready", ({ device_id }) => {
-        spotifyDeviceId = device_id;
-        log("Spotify Ready: " + spotifyDeviceId);
-        setStatus("Spotify ready");
-      });
-
-      spotifyPlayer.addListener("not_ready", ({ device_id }) => {
-        log("Spotify device offline: " + device_id);
-      });
-
-      spotifyPlayer.connect();
-    }
-
-    async function spotifyApi(path, options = {}) {
-      if (!spotifyAccessToken) throw new Error("Spotify not logged in");
-
-      let res = await fetch("https://api.spotify.com/v1" + path, {
-        ...options,
-        headers: {
-          "Authorization": "Bearer " + spotifyAccessToken,
-          "Content-Type": "application/json",
-          ...(options.headers || {})
-        }
-      });
-
-      if (res.status === 401) {
-        await refreshSpotifyToken();
-        res = await fetch("https://api.spotify.com/v1" + path, {
-          ...options,
-          headers: {
-            "Authorization": "Bearer " + spotifyAccessToken,
-            "Content-Type": "application/json",
-            ...(options.headers || {})
-          }
-        });
-      }
-
-      return res;
-    }
-
-    async function playSong(query){
-      try{
-        if(!spotifyDeviceId){
-          log("Spotify device not ready yet");
-          return;
-        }
-
-        const searchRes = await spotifyApi(`/search?q=${encodeURIComponent(query)}&type=track&limit=1`);
-        const searchData = await searchRes.json();
-
-        if (!searchData.tracks || !searchData.tracks.items || !searchData.tracks.items.length) {
-          log("No song found for: " + query);
-          return;
-        }
-
-        const track = searchData.tracks.items[0];
-        const uri = track.uri;
-
-        const playRes = await spotifyApi(`/me/player/play?device_id=${encodeURIComponent(spotifyDeviceId)}`, {
-          method: "PUT",
-          body: JSON.stringify({ uris: [uri] })
-        });
-
-        if (!playRes.ok && playRes.status !== 204) {
-          const txt = await playRes.text();
-          log("Spotify play failed: " + txt);
-          return;
-        }
-
-        log(`PLAYING -> ${track.name} - ${track.artists.map(a => a.name).join(", ")}`);
-        setStatus("Playing music");
-      }catch(e){
-        log("PLAY SONG ERROR: " + e);
-      }
-    }
-
-    async function pauseSong(){
-      try{
-        if(!spotifyDeviceId) return;
-        const res = await spotifyApi(`/me/player/pause?device_id=${encodeURIComponent(spotifyDeviceId)}`, {
-          method: "PUT"
-        });
-        log("PAUSE STATUS -> " + res.status);
-      }catch(e){
-        log("PAUSE ERROR: " + e);
-      }
-    }
-
-    async function resumeSong(){
-      try{
-        if(!spotifyDeviceId) return;
-        const res = await spotifyApi(`/me/player/play?device_id=${encodeURIComponent(spotifyDeviceId)}`, {
-          method: "PUT"
-        });
-        log("RESUME STATUS -> " + res.status);
-      }catch(e){
-        log("RESUME ERROR: " + e);
-      }
-    }
-
-    async function nextSong(){
-      try{
-        if(!spotifyDeviceId) return;
-        const res = await spotifyApi(`/me/player/next?device_id=${encodeURIComponent(spotifyDeviceId)}`, {
-          method: "POST"
-        });
-        log("NEXT STATUS -> " + res.status);
-      }catch(e){
-        log("NEXT ERROR: " + e);
-      }
-    }
-
-    async function previousSong(){
-      try{
-        if(!spotifyDeviceId) return;
-        const res = await spotifyApi(`/me/player/previous?device_id=${encodeURIComponent(spotifyDeviceId)}`, {
-          method: "POST"
-        });
-        log("PREVIOUS STATUS -> " + res.status);
-      }catch(e){
-        log("PREVIOUS ERROR: " + e);
-      }
-    }
-
-    // =========================
     // BOOT
     // =========================
-    window.onSpotifyWebPlaybackSDKReady = async () => {
-      try{
-        await initSpotifyFromRedirect();
-        if(spotifyAccessToken){
-          initSpotifyPlayer();
-        }else{
-          log("Spotify not logged in yet");
-        }
-      }catch(e){
-        log("Spotify startup error: " + e.message);
-      }
-    };
-
     window.addEventListener("load", () => {
       log("Page loaded");
       setStatus("ready");
