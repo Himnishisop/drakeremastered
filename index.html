@@ -2,41 +2,31 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Drake AI FINAL</title>
+<title>Drake AI Final</title>
 
 <style>
-body{
-  background:#0f1115;
-  color:#fff;
-  font-family:Arial;
-}
-button{
-  padding:10px;
-  margin:5px;
-  border:none;
-  border-radius:8px;
-  background:#2d6cdf;
-  color:white;
-}
-#debug{
-  background:black;
-  color:#00ff88;
-  height:200px;
-  overflow:auto;
-  margin-top:10px;
-}
+body{background:#0f1115;color:#fff;font-family:sans-serif;margin:0}
+.top{padding:10px;background:#151923;display:flex;gap:10px;flex-wrap:wrap}
+button{padding:10px;border:none;border-radius:8px;background:#2d6cdf;color:#fff;cursor:pointer}
+#debug{background:#000;color:#0f0;height:250px;overflow:auto;margin:10px;padding:10px;font-size:12px}
+#status{padding:10px;color:#9fd3ff}
 </style>
 </head>
 
 <body>
 
+<div class="top">
 <button onclick="connectBLE()">CONNECT LIGHT</button>
 <button onclick="startVoice()">START VOICE</button>
-<button onclick="arm()">ARM AUDIO</button>
+<button onclick="testRed()">TEST RED</button>
+<button onclick="pauseMusic()">PAUSE</button>
+<button onclick="resumeMusic()">RESUME</button>
+</div>
+
+<div id="status">idle</div>
+<pre id="debug"></pre>
 
 <div id="player"></div>
-
-<pre id="debug"></pre>
 
 <script src="https://www.youtube.com/iframe_api"></script>
 
@@ -47,185 +37,171 @@ const MISTRAL_API_KEY = "sb4uBrl67jk1RV2gg1gLZqh2lkoSq3Py";
 const YT_API_KEY = "AIzaSyBW9ylko1FTzfvco2NShiRE4lkI29fP7tc";
 
 const DEVICE_NAME = "CLK";
+const SERVICE_UUID = "0000fff0-0000-1000-8000-00805f9b34fb";
 const CHAR_UUID = "0000fff3-0000-1000-8000-00805f9b34fb";
 
-const WAKE = ["drake","drink","break","dre","dark"];
+const WAKE_WORDS = ["drake","drink","break","dre"];
 
 // ================= DEBUG =================
 function log(t){
-  let d=document.getElementById("debug");
-  d.textContent+=t+"\n";
-  d.scrollTop=d.scrollHeight;
-  console.log(t);
+document.getElementById("debug").textContent+=t+"\n";
+console.log(t);
+}
+
+function setStatus(t){
+document.getElementById("status").innerText=t;
 }
 
 // ================= BLE =================
-let char;
+let bleChar=null;
 
 function packet(r,g,b){
-  return new Uint8Array([0x7e,0x07,0x05,0x03,r,g,b,0x10,0xef]);
+return new Uint8Array([0x7e,0x07,0x05,0x03,r,g,b,0x10,0xef]);
 }
 
 async function connectBLE(){
-  let dev=await navigator.bluetooth.requestDevice({
-    filters:[{namePrefix:DEVICE_NAME}],
-    optionalServices:["0000fff0-0000-1000-8000-00805f9b34fb"]
-  });
+try{
+const device=await navigator.bluetooth.requestDevice({
+filters:[{namePrefix:DEVICE_NAME}],
+optionalServices:[SERVICE_UUID]
+});
+const server=await device.gatt.connect();
+const service=await server.getPrimaryService(SERVICE_UUID);
+bleChar=await service.getCharacteristic(CHAR_UUID);
 
-  let server=await dev.gatt.connect();
-  let service=await server.getPrimaryService("0000fff0-0000-1000-8000-00805f9b34fb");
-  char=await service.getCharacteristic(CHAR_UUID);
-
-  log("BLE CONNECTED");
+log("BLE CONNECTED");
+}catch(e){log("BLE ERROR "+e);}
 }
 
 async function setLight(r,g,b){
-  if(!char) return;
-  await char.writeValue(packet(r,g,b));
+if(!bleChar)return;
+await bleChar.writeValue(packet(r,g,b));
 }
+
+function testRed(){setLight(255,0,0);}
 
 // ================= YOUTUBE =================
 let player;
 let ready=false;
-let unlocked=false;
 
 function onYouTubeIframeAPIReady(){
-  player=new YT.Player("player",{
-    height:"0",
-    width:"0",
-    videoId:"",
-    playerVars:{autoplay:1},
-    events:{
-      onReady:()=>{ready=true;log("YT READY");}
-    }
-  });
+player=new YT.Player("player",{height:"0",width:"0",events:{
+onReady:()=>{ready=true;log("YT READY")}
+}});
 }
+
 window.onYouTubeIframeAPIReady=onYouTubeIframeAPIReady;
 
 async function playMusic(q){
-  if(!unlocked){
-    speak("Click arm audio first");
-    return;
-  }
+try{
+log("SEARCH "+q);
 
-  log("SEARCH "+q);
+const res=await fetch(`https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=1&q=${encodeURIComponent(q)}&key=${YT_API_KEY}`);
+const data=await res.json();
 
-  let url=`https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=1&q=${encodeURIComponent(q)}&key=${YT_API_KEY}`;
+let id=data.items[0].id.videoId;
+let title=data.items[0].snippet.title;
 
-  let res=await fetch(url);
-  let data=await res.json();
+log("PLAY "+title);
 
-  if(!data.items.length){
-    speak("Song nahi mila");
-    return;
-  }
+player.loadVideoById(id);
+player.playVideo();
 
-  let id=data.items[0].id.videoId;
-  let title=data.items[0].snippet.title;
-
-  log("PLAY "+title);
-
-  player.loadVideoById(id);
-  player.playVideo();
+}catch(e){log("YT ERROR "+e);}
 }
 
-function pauseMusic(){player.pauseVideo();}
-function resumeMusic(){player.playVideo();}
-
-// ================= ARM =================
-function arm(){
-  unlocked=true;
-  log("AUDIO ARMED");
-}
+function pauseMusic(){if(player)player.pauseVideo();}
+function resumeMusic(){if(player)player.playVideo();}
 
 // ================= SPEAK =================
 function speak(t){
-  let u=new SpeechSynthesisUtterance(t);
-  speechSynthesis.speak(u);
+let u=new SpeechSynthesisUtterance(t);
+speechSynthesis.speak(u);
 }
 
 // ================= VOICE =================
 let rec;
 
 function startVoice(){
-  let SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-  rec=new SR();
-  rec.continuous=true;
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+rec=new SR();
+rec.continuous=true;
 
-  rec.onresult=async(e)=>{
-    let text=e.results[e.results.length-1][0].transcript.toLowerCase();
-    log("HEARD "+text);
+rec.onresult=async e=>{
+let text=e.results[e.results.length-1][0].transcript.toLowerCase();
+log("HEARD "+text);
 
-    let wake=WAKE.find(w=>text.includes(w));
-    if(!wake) return;
+let wake=WAKE_WORDS.find(w=>text.includes(w));
+if(!wake)return;
 
-    let cmd=text.replace(wake,"").trim();
+let cmd=text.replace(wake,"").trim();
 
-    await askAI(cmd);
-  };
+await askAI(cmd);
+};
 
-  rec.start();
+rec.start();
 }
 
 // ================= AI =================
-const PROMPT = `
-Reply ONLY JSON.
+const PROMPT=`
+Return ONLY JSON.
 
 Music:
 {"type":"music","action":"play","query":"song"}
 
 Light:
-{"type":"light","value":[255,0,0]}
+{"type":"light","r":255,"g":0,"b":0}
 
 Question:
-{"type":"question","response":"text"}
+{"type":"say","text":"answer"}
 `;
 
 async function askAI(q){
-  log("AI "+q);
+try{
+log("AI "+q);
 
-  let res=await fetch("https://api.mistral.ai/v1/chat/completions",{
-    method:"POST",
-    headers:{
-      "Authorization":"Bearer "+MISTRAL_API_KEY,
-      "Content-Type":"application/json"
-    },
-    body:JSON.stringify({
-      model:"mistral-large-latest",
-      messages:[
-        {role:"system",content:PROMPT},
-        {role:"user",content:q}
-      ]
-    })
-  });
+const res=await fetch("https://api.mistral.ai/v1/chat/completions",{
+method:"POST",
+headers:{
+"Authorization":"Bearer "+MISTRAL_API_KEY,
+"Content-Type":"application/json"
+},
+body:JSON.stringify({
+model:"mistral-large-latest",
+messages:[
+{role:"system",content:PROMPT},
+{role:"user",content:q}
+]
+})
+});
 
-  let data=await res.json();
-  let raw=data.choices[0].message.content.replace(/```/g,"").trim();
+let data=await res.json();
+let raw=data.choices[0].message.content.replace(/```/g,"");
+log("RAW "+raw);
 
-  log("RAW "+raw);
+let obj=JSON.parse(raw);
 
-  let obj=JSON.parse(raw);
+handleAI(obj);
 
-  handle(obj);
+}catch(e){log("AI ERR "+e);}
 }
 
-// ================= HANDLE =================
-function handle(o){
+function handleAI(o){
 
-  if(o.type==="music"){
-    playMusic(o.query);
-  }
+if(o.type==="music"){
+playMusic(o.query);
+}
 
-  if(o.type==="light"){
-    setLight(o.value[0],o.value[1],o.value[2]);
-  }
+if(o.type==="light"){
+setLight(o.r,o.g,o.b);
+}
 
-  if(o.type==="question"){
-    speak(o.response);
-  }
+if(o.type==="say"){
+speak(o.text);
+}
+
 }
 
 </script>
-
 </body>
 </html>
