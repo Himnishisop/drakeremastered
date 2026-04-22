@@ -1,207 +1,937 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>Drake AI Final</title>
-
-<style>
-body{background:#0f1115;color:#fff;font-family:sans-serif;margin:0}
-.top{padding:10px;background:#151923;display:flex;gap:10px;flex-wrap:wrap}
-button{padding:10px;border:none;border-radius:8px;background:#2d6cdf;color:#fff;cursor:pointer}
-#debug{background:#000;color:#0f0;height:250px;overflow:auto;margin:10px;padding:10px;font-size:12px}
-#status{padding:10px;color:#9fd3ff}
-</style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Drake Remastered Ultimate</title>
+  <style>
+    :root{
+      --bg:#0f1115;
+      --panel:#151923;
+      --panel2:#171b24;
+      --text:#ffffff;
+      --muted:#9fd3ff;
+      --green:#00ff88;
+      --blue:#2d6cdf;
+      --gray:#2b2f3a;
+      --border:#2a3140;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      background:var(--bg);
+      color:var(--text);
+      font-family:Arial,Helvetica,sans-serif;
+    }
+    .topbar{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      padding:14px;
+      position:sticky;
+      top:0;
+      background:var(--panel);
+      z-index:20;
+      border-bottom:1px solid var(--border);
+    }
+    button{
+      border:none;
+      padding:12px 16px;
+      border-radius:10px;
+      background:var(--blue);
+      color:#fff;
+      font-weight:700;
+      cursor:pointer;
+    }
+    button.secondary{ background:var(--gray); }
+    #status{
+      padding:0 14px 12px;
+      color:var(--muted);
+      font-weight:700;
+    }
+    .grid{
+      display:grid;
+      grid-template-columns: 1.2fr 0.8fr;
+      gap:14px;
+      padding:0 14px 14px;
+    }
+    .card{
+      background:var(--panel2);
+      border:1px solid var(--border);
+      border-radius:12px;
+      padding:14px;
+    }
+    .title{
+      font-size:15px;
+      font-weight:800;
+      margin-bottom:10px;
+    }
+    .badge{
+      display:inline-block;
+      padding:4px 8px;
+      border-radius:999px;
+      background:#222838;
+      margin-right:6px;
+      margin-bottom:6px;
+      font-size:12px;
+    }
+    #debug{
+      height:340px;
+      overflow:auto;
+      white-space:pre-wrap;
+      background:#000;
+      color:var(--green);
+      border-radius:12px;
+      border:1px solid #243;
+      font-family:Consolas,monospace;
+      font-size:13px;
+      padding:12px;
+      margin-top:10px;
+    }
+    #playerWrap{
+      border:1px solid var(--border);
+      border-radius:12px;
+      overflow:hidden;
+      background:#000;
+      min-height:250px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
+    #player{
+      width:100%;
+      max-width:100%;
+      height:250px;
+    }
+    .row{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      margin-top:10px;
+    }
+    .mini{
+      font-size:13px;
+      line-height:1.5;
+      color:#d5d9e3;
+    }
+    .kv{
+      display:grid;
+      grid-template-columns:140px 1fr;
+      gap:8px;
+      margin-top:8px;
+      font-size:14px;
+    }
+    input[type="range"]{
+      width:100%;
+    }
+    #nowPlaying{
+      color:#ffd37a;
+      font-weight:700;
+      margin-top:10px;
+      min-height:20px;
+    }
+    #voiceIndicator{
+      color:#9cff9c;
+      font-weight:700;
+      min-height:20px;
+    }
+    @media (max-width:900px){
+      .grid{grid-template-columns:1fr}
+      #player{height:220px}
+    }
+  </style>
 </head>
-
 <body>
 
-<div class="top">
-<button onclick="connectBLE()">CONNECT LIGHT</button>
-<button onclick="startVoice()">START VOICE</button>
-<button onclick="testRed()">TEST RED</button>
-<button onclick="pauseMusic()">PAUSE</button>
-<button onclick="resumeMusic()">RESUME</button>
-</div>
+  <div class="topbar">
+    <button onclick="connectBLE()">CONNECT LIGHT</button>
+    <button onclick="armMedia()">ARM AUDIO</button>
+    <button onclick="startVoice()">START VOICE</button>
+    <button class="secondary" onclick="stopVoice()">STOP VOICE</button>
+    <button class="secondary" onclick="testRed()">TEST RED</button>
+    <button class="secondary" onclick="setLight(0,0,255)">TEST BLUE</button>
+    <button class="secondary" onclick="pauseMusic()">PAUSE</button>
+    <button class="secondary" onclick="resumeMusic()">RESUME</button>
+    <button class="secondary" onclick="stopMusic()">STOP</button>
+  </div>
 
-<div id="status">idle</div>
-<pre id="debug"></pre>
+  <div id="status">idle</div>
 
-<div id="player"></div>
+  <div class="grid">
+    <div class="card">
+      <div class="title">Player</div>
+      <div id="playerWrap">
+        <div id="player"></div>
+      </div>
+      <div id="nowPlaying">Nothing playing</div>
+      <div class="row">
+        <button class="secondary" onclick="setPlayerVolume(20)">VOL 20</button>
+        <button class="secondary" onclick="setPlayerVolume(50)">VOL 50</button>
+        <button class="secondary" onclick="setPlayerVolume(100)">VOL 100</button>
+      </div>
+      <div class="row">
+        <div style="flex:1;min-width:220px">
+          <input id="volSlider" type="range" min="0" max="100" value="50" oninput="setPlayerVolume(this.value)">
+        </div>
+      </div>
+    </div>
 
-<script src="https://www.youtube.com/iframe_api"></script>
+    <div class="card">
+      <div class="title">Status</div>
+      <span class="badge">Wake: drake / drink / break / dark / dre</span>
+      <span class="badge">BLE: CLK</span>
+      <span class="badge">Music: YouTube exact search</span>
+      <div class="kv">
+        <div>Voice</div><div id="voiceIndicator">stopped</div>
+        <div>BLE</div><div id="bleState">not connected</div>
+        <div>Audio Arm</div><div id="armState">not armed</div>
+      </div>
+      <div class="mini" style="margin-top:12px">
+        Example commands:<br>
+        <b>Drake play god's plan</b><br>
+        <b>Drake play naksha</b><br>
+        <b>Drake pause music</b><br>
+        <b>Drake resume music</b><br>
+        <b>Drake stop music</b><br>
+        <b>Drake set light red</b><br>
+        <b>Drake brightness 30</b><br>
+        <b>Drake what is photosynthesis</b>
+      </div>
+    </div>
+  </div>
 
-<script>
+  <div class="card" style="margin:0 14px 14px">
+    <div class="title">Debug</div>
+    <pre id="debug"></pre>
+  </div>
 
-// ================= CONFIG =================
-const MISTRAL_API_KEY = "sb4uBrl67jk1RV2gg1gLZqh2lkoSq3Py";
-const YT_API_KEY = "AIzaSyBW9ylko1FTzfvco2NShiRE4lkI29fP7tc";
+  <div id="playerHiddenAnchor" style="position:fixed;left:-9999px;top:-9999px"></div>
 
-const DEVICE_NAME = "CLK";
-const SERVICE_UUID = "0000fff0-0000-1000-8000-00805f9b34fb";
-const CHAR_UUID = "0000fff3-0000-1000-8000-00805f9b34fb";
+  <script src="https://www.youtube.com/iframe_api"></script>
+  <script>
+    // =========================
+    // CONFIG
+    // =========================
+    const MISTRAL_API_KEY = "sb4uBrl67jk1RV2gg1gLZqh2lkoSq3Py";
+    const YT_API_KEY = "AIzaSyBW9ylko1FTzfvco2NShiRE4lkI29fP7tc";
 
-const WAKE_WORDS = ["drake","drink","break","dre"];
+    const DEVICE_NAME = "CLK";
+    const SERVICE_UUID = "0000fff0-0000-1000-8000-00805f9b34fb";
+    const CHAR_UUID = "0000fff3-0000-1000-8000-00805f9b34fb";
+    const WAKE_WORDS = ["drake","drink","break","dark","dre"];
 
-// ================= DEBUG =================
-function log(t){
-document.getElementById("debug").textContent+=t+"\n";
-console.log(t);
-}
+    // =========================
+    // STATE
+    // =========================
+    let bleChar = null;
+    let bleDevice = null;
 
-function setStatus(t){
-document.getElementById("status").innerText=t;
-}
+    let recognition = null;
+    let manuallyStoppedVoice = false;
+    let handlingSpeech = false;
+    let lastCommandAt = 0;
 
-// ================= BLE =================
-let bleChar=null;
+    let ytPlayer = null;
+    let ytReady = false;
+    let mediaArmed = false;
+    let currentVolume = 50;
+    let currentVideo = null;
 
-function packet(r,g,b){
-return new Uint8Array([0x7e,0x07,0x05,0x03,r,g,b,0x10,0xef]);
-}
+    let pendingVoiceRestart = null;
 
-async function connectBLE(){
-try{
-const device=await navigator.bluetooth.requestDevice({
-filters:[{namePrefix:DEVICE_NAME}],
-optionalServices:[SERVICE_UUID]
-});
-const server=await device.gatt.connect();
-const service=await server.getPrimaryService(SERVICE_UUID);
-bleChar=await service.getCharacteristic(CHAR_UUID);
+    // =========================
+    // UI
+    // =========================
+    function log(msg){
+      const box = document.getElementById("debug");
+      const line = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      box.textContent += line + "\n";
+      box.scrollTop = box.scrollHeight;
+      console.log(line);
+    }
 
-log("BLE CONNECTED");
-}catch(e){log("BLE ERROR "+e);}
-}
+    function setStatus(text){
+      document.getElementById("status").innerText = text;
+    }
 
-async function setLight(r,g,b){
-if(!bleChar)return;
-await bleChar.writeValue(packet(r,g,b));
-}
+    function setVoiceIndicator(text){
+      document.getElementById("voiceIndicator").innerText = text;
+    }
 
-function testRed(){setLight(255,0,0);}
+    function setBleState(text){
+      document.getElementById("bleState").innerText = text;
+    }
 
-// ================= YOUTUBE =================
-let player;
-let ready=false;
+    function setArmState(text){
+      document.getElementById("armState").innerText = text;
+    }
 
-function onYouTubeIframeAPIReady(){
-player=new YT.Player("player",{height:"0",width:"0",events:{
-onReady:()=>{ready=true;log("YT READY")}
-}});
-}
+    window.onerror = function(message, source, lineno, colno){
+      log(`JS ERROR: ${message} @ ${lineno}:${colno}`);
+    };
 
-window.onYouTubeIframeAPIReady=onYouTubeIframeAPIReady;
+    // =========================
+    // BLE
+    // =========================
+    function packet(r,g,b){
+      return new Uint8Array([0x7e,0x07,0x05,0x03,r,g,b,0x10,0xef]);
+    }
 
-async function playMusic(q){
-try{
-log("SEARCH "+q);
+    async function connectBLE(){
+      try{
+        setStatus("scanning BLE...");
+        log("Scanning BLE light...");
 
-const res=await fetch(`https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=1&q=${encodeURIComponent(q)}&key=${YT_API_KEY}`);
-const data=await res.json();
+        bleDevice = await navigator.bluetooth.requestDevice({
+          filters:[{namePrefix: DEVICE_NAME}],
+          optionalServices:[SERVICE_UUID]
+        });
 
-let id=data.items[0].id.videoId;
-let title=data.items[0].snippet.title;
+        bleDevice.addEventListener("gattserverdisconnected", () => {
+          bleChar = null;
+          log("BLE disconnected");
+          setBleState("disconnected");
+          setStatus("BLE disconnected");
+        });
 
-log("PLAY "+title);
+        const server = await bleDevice.gatt.connect();
+        const service = await server.getPrimaryService(SERVICE_UUID);
+        bleChar = await service.getCharacteristic(CHAR_UUID);
 
-player.loadVideoById(id);
-player.playVideo();
+        log("BLE connected");
+        setBleState("connected");
+        setStatus("BLE connected");
+      }catch(e){
+        log("BLE ERROR: " + e);
+        setBleState("error");
+        setStatus("BLE error");
+      }
+    }
 
-}catch(e){log("YT ERROR "+e);}
-}
+    async function setLight(r,g,b){
+      if(!bleChar){
+        log("BLE not connected");
+        return;
+      }
 
-function pauseMusic(){if(player)player.pauseVideo();}
-function resumeMusic(){if(player)player.playVideo();}
+      r = Math.max(0, Math.min(255, Math.round(r)));
+      g = Math.max(0, Math.min(255, Math.round(g)));
+      b = Math.max(0, Math.min(255, Math.round(b)));
 
-// ================= SPEAK =================
-function speak(t){
-let u=new SpeechSynthesisUtterance(t);
-speechSynthesis.speak(u);
-}
+      try{
+        if(typeof bleChar.writeValueWithoutResponse === "function"){
+          await bleChar.writeValueWithoutResponse(packet(r,g,b));
+        }else{
+          await bleChar.writeValue(packet(r,g,b));
+        }
+        log(`LIGHT -> ${r},${g},${b}`);
+      }catch(e){
+        log("BLE WRITE ERROR: " + e);
+      }
+    }
 
-// ================= VOICE =================
-let rec;
+    function testRed(){
+      setLight(255,0,0);
+    }
 
-function startVoice(){
-const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-rec=new SR();
-rec.continuous=true;
+    // =========================
+    // YOUTUBE PLAYER
+    // =========================
+    function onYouTubeIframeAPIReady(){
+      ytPlayer = new YT.Player("player", {
+        height: "250",
+        width: "100%",
+        videoId: "",
+        playerVars: {
+          autoplay: 0,
+          controls: 1,
+          rel: 0,
+          playsinline: 1,
+          modestbranding: 1
+        },
+        events: {
+          onReady: () => {
+            ytReady = true;
+            ytPlayer.setVolume(currentVolume);
+            log("YouTube player ready");
+          },
+          onError: (e) => {
+            log("YouTube player error: " + e.data);
+          },
+          onStateChange: (e) => {
+            // -1 unstarted, 0 ended, 1 playing, 2 paused, 3 buffering, 5 cued
+            log("YouTube state: " + e.data);
+          }
+        }
+      });
+    }
+    window.onYouTubeIframeAPIReady = onYouTubeIframeAPIReady;
 
-rec.onresult=async e=>{
-let text=e.results[e.results.length-1][0].transcript.toLowerCase();
-log("HEARD "+text);
+    async function armMedia(){
+      try{
+        if(!ytReady || !ytPlayer){
+          log("Player not ready yet");
+          return;
+        }
 
-let wake=WAKE_WORDS.find(w=>text.includes(w));
-if(!wake)return;
+        ytPlayer.mute();
+        ytPlayer.playVideo();
 
-let cmd=text.replace(wake,"").trim();
+        await new Promise(r => setTimeout(r, 400));
 
-await askAI(cmd);
-};
+        ytPlayer.pauseVideo();
+        ytPlayer.unMute();
+        ytPlayer.setVolume(currentVolume);
 
-rec.start();
-}
+        mediaArmed = true;
+        setArmState("armed");
+        log("MEDIA ARMED");
+        setStatus("audio armed");
+        speak("Audio armed");
+      }catch(e){
+        log("ARM MEDIA ERROR: " + e);
+      }
+    }
 
-// ================= AI =================
-const PROMPT=`
-Return ONLY JSON.
+    async function searchYouTubeVideo(query){
+      const url =
+        "https://www.googleapis.com/youtube/v3/search" +
+        "?part=snippet" +
+        "&type=video" +
+        "&maxResults=5" +
+        "&videoEmbeddable=true" +
+        "&safeSearch=none" +
+        "&q=" + encodeURIComponent(query) +
+        "&key=" + encodeURIComponent(YT_API_KEY);
 
-Music:
-{"type":"music","action":"play","query":"song"}
+      const res = await fetch(url);
+      const data = await res.json();
 
-Light:
-{"type":"light","r":255,"g":0,"b":0}
+      if(!res.ok){
+        throw new Error("YouTube HTTP " + res.status + " " + JSON.stringify(data));
+      }
+
+      if(!data.items || !data.items.length){
+        throw new Error("No YouTube video found");
+      }
+
+      return data.items;
+    }
+
+    function normalizeText(s){
+      return (s || "")
+        .toLowerCase()
+        .replace(/['’"]/g, "")
+        .replace(/[^a-z0-9\s]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+
+    function scoreVideo(item, query){
+      const q = normalizeText(query);
+      const title = normalizeText(item?.snippet?.title || "");
+      const channel = normalizeText(item?.snippet?.channelTitle || "");
+      let score = 0;
+
+      if(title === q) score += 200;
+      if(title.includes(q)) score += 120;
+
+      const words = q.split(" ").filter(Boolean);
+      for(const w of words){
+        if(title.includes(w)) score += 15;
+        if(channel.includes(w)) score += 4;
+      }
+
+      if(title.includes("official")) score += 20;
+      if(title.includes("audio")) score += 10;
+      if(title.includes("lyrics")) score -= 5;
+      if(title.includes("cover")) score -= 20;
+      if(title.includes("remix")) score -= 10;
+      if(title.includes("live")) score -= 8;
+      if(title.includes("shorts")) score -= 60;
+
+      return score;
+    }
+
+    async function playMusic(query){
+      try{
+        if(!mediaArmed){
+          log("MEDIA NOT ARMED");
+          speak("Pehle arm audio button dabao");
+          return;
+        }
+
+        if(!ytReady || !ytPlayer){
+          log("YT player not ready");
+          return;
+        }
+
+        setStatus("Searching YouTube...");
+        log("YT SEARCH -> " + query);
+
+        const items = await searchYouTubeVideo(query);
+
+        let best = null;
+        let bestScore = -99999;
+
+        for(const item of items){
+          const score = scoreVideo(item, query);
+          log(`YT CANDIDATE -> ${item.snippet.title} | score=${score}`);
+          if(score > bestScore){
+            bestScore = score;
+            best = item;
+          }
+        }
+
+        if(!best || !best.id || !best.id.videoId){
+          throw new Error("No playable result");
+        }
+
+        const videoId = best.id.videoId;
+        currentVideo = {
+          id: videoId,
+          title: best.snippet.title,
+          channel: best.snippet.channelTitle
+        };
+
+        ytPlayer.loadVideoById(videoId);
+        ytPlayer.setVolume(currentVolume);
+        ytPlayer.playVideo();
+
+        document.getElementById("nowPlaying").innerText =
+          "Now playing: " + currentVideo.title + " — " + currentVideo.channel;
+
+        log(`YT PLAY -> ${currentVideo.title} (${videoId})`);
+        setStatus("Playing music");
+      }catch(e){
+        log("YT PLAY ERROR: " + e.message);
+        speak("Song nahi mila ya play nahi hua");
+      }
+    }
+
+    function pauseMusic(){
+      if(ytPlayer && ytReady){
+        ytPlayer.pauseVideo();
+        log("YT PAUSE");
+      }
+    }
+
+    function resumeMusic(){
+      if(!mediaArmed){
+        speak("Pehle arm audio button dabao");
+        return;
+      }
+      if(ytPlayer && ytReady){
+        ytPlayer.playVideo();
+        log("YT RESUME");
+      }
+    }
+
+    function stopMusic(){
+      if(ytPlayer && ytReady){
+        ytPlayer.stopVideo();
+        log("YT STOP");
+        document.getElementById("nowPlaying").innerText = "Nothing playing";
+      }
+    }
+
+    function setPlayerVolume(v){
+      currentVolume = Number(v);
+      document.getElementById("volSlider").value = currentVolume;
+      if(ytPlayer && ytReady){
+        ytPlayer.setVolume(currentVolume);
+      }
+      log("YT VOLUME -> " + currentVolume);
+    }
+
+    // =========================
+    // SPEAK
+    // =========================
+    function speak(text){
+      try{
+        window.speechSynthesis.cancel();
+        const u = new SpeechSynthesisUtterance(text);
+        u.lang = "en-US";
+        u.rate = 1;
+        window.speechSynthesis.speak(u);
+        log("SPEAK -> " + text);
+      }catch(e){
+        log("SPEAK ERROR: " + e);
+      }
+    }
+
+    // =========================
+    // FAST LOCAL COMMAND PARSING
+    // =========================
+    const COLOR_MAP = {
+      red:[255,0,0],
+      blue:[0,0,255],
+      green:[0,255,0],
+      white:[255,255,255],
+      yellow:[255,255,0],
+      purple:[128,0,128],
+      pink:[255,105,180],
+      orange:[255,140,0],
+      cyan:[0,255,255]
+    };
+
+    function extractBrightness(text){
+      const m = text.match(/brightness\s+(\d{1,3})/i);
+      if(!m) return null;
+      return Math.max(0, Math.min(100, Number(m[1])));
+    }
+
+    function parseLocalLightCommand(text){
+      const t = text.toLowerCase();
+
+      if(t.includes("turn off light") || t.includes("light off")){
+        return {type:"light", action:"color", value:[0,0,0]};
+      }
+
+      if(t.includes("turn on light") || t.includes("light on")){
+        return {type:"light", action:"color", value:[255,255,255]};
+      }
+
+      const brightness = extractBrightness(t);
+      if(brightness !== null){
+        return {type:"light", action:"brightness", value:brightness};
+      }
+
+      for(const [name, rgb] of Object.entries(COLOR_MAP)){
+        if(t.includes(name) && t.includes("light")){
+          return {type:"light", action:"color", value:rgb};
+        }
+        if(t.includes("make light " + name) || t.includes("set light " + name)){
+          return {type:"light", action:"color", value:rgb};
+        }
+      }
+
+      return null;
+    }
+
+    function parseLocalMusicCommand(text){
+      const t = text.toLowerCase().trim();
+
+      if(t.includes("pause music") || t === "pause"){
+        return {type:"music", action:"pause"};
+      }
+
+      if(t.includes("resume music") || t.includes("continue music") || t === "resume"){
+        return {type:"music", action:"resume"};
+      }
+
+      if(t.includes("stop music") || t === "stop"){
+        return {type:"music", action:"stop"};
+      }
+
+      if(t.startsWith("play ")){
+        return {type:"music", action:"play", query:text.replace(/^play\s+/i,"").trim()};
+      }
+
+      return null;
+    }
+
+    // =========================
+    // VOICE
+    // =========================
+    function getWakeWord(text){
+      const t = text.toLowerCase();
+      for(const w of WAKE_WORDS){
+        if(t.includes(w)) return w;
+      }
+      return null;
+    }
+
+    function createRecognition(){
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if(!SR){
+        log("SpeechRecognition not supported");
+        setStatus("SpeechRecognition unsupported");
+        return null;
+      }
+
+      const rec = new SR();
+      rec.continuous = true;
+      rec.interimResults = false;
+      rec.lang = "en-US";
+
+      rec.onstart = () => {
+        log("VOICE ACTIVE");
+        setVoiceIndicator("active");
+        setStatus("voice active");
+      };
+
+      rec.onresult = async (e) => {
+        try{
+          const text = e.results[e.results.length - 1][0].transcript.toLowerCase().trim();
+          log("HEARD -> " + text);
+
+          const now = Date.now();
+          if(now - lastCommandAt < 700){
+            log("VOICE cooldown");
+            return;
+          }
+
+          if(handlingSpeech) return;
+
+          const wake = getWakeWord(text);
+          if(!wake) return;
+
+          let command = text.replace(wake, "").trim();
+          if(!command){
+            speak("Yes?");
+            return;
+          }
+
+          lastCommandAt = now;
+          handlingSpeech = true;
+          setStatus("processing...");
+
+          // fast local light command
+          const localLight = parseLocalLightCommand(command);
+          if(localLight){
+            log("LOCAL LIGHT COMMAND");
+            await handleAI(localLight);
+            handlingSpeech = false;
+            setStatus("voice active");
+            return;
+          }
+
+          // fast local music command
+          const localMusic = parseLocalMusicCommand(command);
+          if(localMusic){
+            log("LOCAL MUSIC COMMAND");
+            await handleAI(localMusic);
+            handlingSpeech = false;
+            setStatus("voice active");
+            return;
+          }
+
+          // AI fallback
+          await askAI(command);
+          handlingSpeech = false;
+          setStatus("voice active");
+        }catch(err){
+          handlingSpeech = false;
+          log("VOICE RESULT ERROR: " + err);
+        }
+      };
+
+      rec.onerror = (e) => {
+        if(e.error === "no-speech"){
+          log("VOICE idle");
+          return;
+        }
+        log("VOICE ERROR: " + e.error);
+      };
+
+      rec.onend = () => {
+        log("VOICE ENDED");
+        setVoiceIndicator("ended");
+        if(!manuallyStoppedVoice){
+          clearTimeout(pendingVoiceRestart);
+          pendingVoiceRestart = setTimeout(() => {
+            try{
+              rec.start();
+              log("VOICE RESTART");
+            }catch(e){
+              log("VOICE RESTART ERROR: " + e);
+            }
+          }, 250);
+        }
+      };
+
+      return rec;
+    }
+
+    function startVoice(){
+      if(!recognition){
+        recognition = createRecognition();
+        if(!recognition) return;
+      }
+
+      manuallyStoppedVoice = false;
+      try{
+        recognition.start();
+      }catch(e){
+        log("VOICE START ERROR: " + e);
+      }
+    }
+
+    function stopVoice(){
+      manuallyStoppedVoice = true;
+      if(recognition){
+        try{
+          recognition.stop();
+        }catch(e){
+          log("VOICE STOP ERROR: " + e);
+        }
+      }
+      setVoiceIndicator("stopped");
+      setStatus("voice stopped");
+    }
+
+    // =========================
+    // AI
+    // =========================
+    const SYSTEM_PROMPT = `
+You are Drake, a smart assistant that controls BLE RGB lights, YouTube music, and answers questions.
+
+IMPORTANT:
+- Reply ONLY in valid JSON.
+- No markdown.
+- No code fences.
+- No explanation outside JSON.
+
+Formats:
+
+Light color:
+{"type":"light","action":"color","value":[255,0,0]}
+
+Brightness:
+{"type":"light","action":"brightness","value":30}
+
+Music play:
+{"type":"music","action":"play","query":"God's Plan Drake"}
+
+Music pause:
+{"type":"music","action":"pause"}
+
+Music resume:
+{"type":"music","action":"resume"}
+
+Music stop:
+{"type":"music","action":"stop"}
 
 Question:
-{"type":"say","text":"answer"}
+{"type":"question","response":"your answer","speak":true}
+
+Combo:
+{"type":"combo","actions":[
+  {"type":"light","action":"color","value":[0,0,255]},
+  {"type":"music","action":"play","query":"lofi"}
+]}
+
+Rules:
+- Preserve exact song names in music query.
+- For color requests, return explicit RGB values.
+- For brightness, return 0 to 100.
+- For normal questions, answer short and clean.
 `;
 
-async function askAI(q){
-try{
-log("AI "+q);
+    function cleanAIResponse(text){
+      return (text || "")
+        .replace(/```json/gi, "")
+        .replace(/```/g, "")
+        .trim();
+    }
 
-const res=await fetch("https://api.mistral.ai/v1/chat/completions",{
-method:"POST",
-headers:{
-"Authorization":"Bearer "+MISTRAL_API_KEY,
-"Content-Type":"application/json"
-},
-body:JSON.stringify({
-model:"mistral-large-latest",
-messages:[
-{role:"system",content:PROMPT},
-{role:"user",content:q}
-]
-})
-});
+    async function askAI(userText){
+      log("AI ASK -> " + userText);
 
-let data=await res.json();
-let raw=data.choices[0].message.content.replace(/```/g,"");
-log("RAW "+raw);
+      try{
+        const res = await fetch("https://api.mistral.ai/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Authorization": "Bearer " + MISTRAL_API_KEY,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            model: "mistral-large-latest",
+            messages: [
+              {role:"system", content:SYSTEM_PROMPT},
+              {role:"user", content:userText}
+            ],
+            temperature: 0.2
+          })
+        });
 
-let obj=JSON.parse(raw);
+        const data = await res.json();
 
-handleAI(obj);
+        if(!res.ok){
+          log("MISTRAL HTTP ERROR: " + res.status + " " + JSON.stringify(data));
+          return;
+        }
 
-}catch(e){log("AI ERR "+e);}
-}
+        let raw = data?.choices?.[0]?.message?.content || "";
+        raw = cleanAIResponse(raw);
+        log("AI RAW -> " + raw);
 
-function handleAI(o){
+        const obj = JSON.parse(raw);
+        await handleAI(obj);
+      }catch(e){
+        log("AI ERROR: " + e);
+        speak("AI error aaya");
+      }
+    }
 
-if(o.type==="music"){
-playMusic(o.query);
-}
+    async function handleAI(obj){
+      if(!obj || !obj.type){
+        log("Invalid AI object");
+        return;
+      }
 
-if(o.type==="light"){
-setLight(o.r,o.g,o.b);
-}
+      if(obj.type === "combo" && Array.isArray(obj.actions)){
+        for(const action of obj.actions){
+          await handleAI(action);
+        }
+        return;
+      }
 
-if(o.type==="say"){
-speak(o.text);
-}
+      if(obj.type === "light"){
+        if(obj.action === "color" && Array.isArray(obj.value) && obj.value.length === 3){
+          await setLight(obj.value[0], obj.value[1], obj.value[2]);
+          return;
+        }
 
-}
+        if(obj.action === "brightness"){
+          const pct = Math.max(0, Math.min(100, Number(obj.value) || 0));
+          const v = Math.round((pct / 100) * 255);
+          await setLight(v,v,v);
+          return;
+        }
+      }
 
-</script>
+      if(obj.type === "music"){
+        if(obj.action === "play" && obj.query){
+          await playMusic(obj.query);
+          return;
+        }
+        if(obj.action === "pause"){
+          pauseMusic();
+          return;
+        }
+        if(obj.action === "resume"){
+          resumeMusic();
+          return;
+        }
+        if(obj.action === "stop"){
+          stopMusic();
+          return;
+        }
+      }
+
+      if(obj.type === "question"){
+        if(obj.response){
+          log("AI ANSWER -> " + obj.response);
+          if(obj.speak) speak(obj.response);
+        }
+        return;
+      }
+
+      log("Unhandled AI object: " + JSON.stringify(obj));
+    }
+
+    // =========================
+    // BOOT
+    // =========================
+    window.addEventListener("load", () => {
+      log("Page loaded");
+      setStatus("ready");
+      setVoiceIndicator("stopped");
+      setBleState("not connected");
+      setArmState("not armed");
+    });
+  </script>
 </body>
-</html>
+</html> 
