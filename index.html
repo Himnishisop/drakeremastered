@@ -933,5 +933,127 @@ Rules:
       setArmState("not armed");
     });
   </script>
+  <!-- ================= AUTO HOLOGRAM ================= -->
+
+<button id="holoBtn">HOLOGRAM</button>
+
+<div id="holoWrap">
+  <div id="holoOverlay"></div>
+
+  <iframe id="holoFrame"
+    src="https://sketchfab.com/models/17cf917d160645b6a57a09c420ed647d/embed?autostart=1&ui_controls=0&ui_infos=0&ui_stop=0&ui_hint=0"
+    frameborder="0"
+    allow="autoplay; fullscreen">
+  </iframe>
+</div>
+
+<style>
+#holoBtn{
+  position:fixed;
+  top:20px;
+  right:20px;
+  z-index:999;
+  padding:12px 18px;
+  background:#111;
+  color:#fff;
+  border:1px solid #333;
+  border-radius:10px;
+}
+
+#holoWrap{
+  position:fixed;
+  inset:0;
+  background:#000;
+  display:none;
+  justify-content:center;
+  align-items:center;
+  z-index:9999;
+}
+
+#holoFrame{
+  width:80vw;
+  height:80vh;
+  border:none;
+  pointer-events:none;
+  filter:brightness(1.2) contrast(1.3);
+}
+
+#holoOverlay{
+  position:absolute;
+  inset:0;
+  background:rgba(255,0,0,0.15);
+  mix-blend-mode:screen;
+  transition:0.3s;
+}
+
+/* voice active = blue */
+.holo-active #holoOverlay{
+  background:rgba(0,150,255,0.25);
+}
+
+/* speaking pulse */
+.holo-speaking #holoFrame{
+  animation:pulse 0.35s infinite;
+}
+
+@keyframes pulse{
+  0%{transform:scale(1)}
+  50%{transform:scale(1.1)}
+  100%{transform:scale(1)}
+}
+</style>
+
+<script>
+let holoOn=false;
+
+// ================= ENABLE =================
+document.getElementById("holoBtn").onclick=()=>{
+  document.getElementById("holoWrap").style.display="flex";
+  holoOn=true;
+  history.pushState({holo:true},"");
+};
+
+// ================= BACK EXIT =================
+window.onpopstate=()=>{
+  if(holoOn){
+    document.getElementById("holoWrap").style.display="none";
+    document.body.classList.remove("holo-active","holo-speaking");
+    holoOn=false;
+  }
+};
+
+// ================= AUTO VOICE DETECT =================
+setInterval(()=>{
+
+  // detect voice active from status text
+  let status=document.getElementById("status")?.innerText.toLowerCase()||"";
+
+  if(status.includes("voice active") || status.includes("active")){
+    document.body.classList.add("holo-active");
+  }else{
+    document.body.classList.remove("holo-active");
+  }
+
+},300);
+
+
+// ================= AUTO SPEECH DETECT =================
+
+// hook speech synthesis (AI speaking)
+const origSpeak = window.speechSynthesis.speak;
+
+window.speechSynthesis.speak = function(utt){
+  document.body.classList.add("holo-speaking");
+
+  utt.onend = ()=>{
+    document.body.classList.remove("holo-speaking");
+  };
+
+  return origSpeak.call(this, utt);
+};
+
+</script>
+
+<!-- ================= END ================= -->
 </body>
 </html>
