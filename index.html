@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Drake Remastered Ultimate</title>
+  <title>Drake Remastered Ultimate Offline-Sensitive</title>
   <style>
     :root{
       --bg:#0f1115;
@@ -181,6 +181,7 @@
       <span class="badge">Wake: drake / drink / break / dark / dre</span>
       <span class="badge">BLE: CLK</span>
       <span class="badge">Music: YouTube exact search</span>
+      <span class="badge">Speech: local try</span>
       <div class="kv">
         <div>Voice</div><div id="voiceIndicator">stopped</div>
         <div>BLE</div><div id="bleState">not connected</div>
@@ -194,7 +195,7 @@
         <b>Drake resume music</b><br>
         <b>Drake stop music</b><br>
         <b>Drake set light red</b><br>
-        <b>Drake brightness 30</b><br>
+        <b>Drake brightness 40</b><br>
         <b>Drake what is photosynthesis</b>
       </div>
     </div>
@@ -205,13 +206,8 @@
     <pre id="debug"></pre>
   </div>
 
-  <div id="playerHiddenAnchor" style="position:fixed;left:-9999px;top:-9999px"></div>
-
   <script src="https://www.youtube.com/iframe_api"></script>
   <script>
-    // =========================
-    // CONFIG
-    // =========================
     const MISTRAL_API_KEY = "sb4uBrl67jk1RV2gg1gLZqh2lkoSq3Py";
     const YT_API_KEY = "AIzaSyBW9ylko1FTzfvco2NShiRE4lkI29fP7tc";
 
@@ -220,9 +216,6 @@
     const CHAR_UUID = "0000fff3-0000-1000-8000-00805f9b34fb";
     const WAKE_WORDS = ["drake","drink","break","dark","dre"];
 
-    // =========================
-    // STATE
-    // =========================
     let bleChar = null;
     let bleDevice = null;
 
@@ -230,6 +223,7 @@
     let manuallyStoppedVoice = false;
     let handlingSpeech = false;
     let lastCommandAt = 0;
+    let voiceRestartTimer = null;
 
     let ytPlayer = null;
     let ytReady = false;
@@ -237,11 +231,6 @@
     let currentVolume = 50;
     let currentVideo = null;
 
-    let pendingVoiceRestart = null;
-
-    // =========================
-    // UI
-    // =========================
     function log(msg){
       const box = document.getElementById("debug");
       const line = `[${new Date().toLocaleTimeString()}] ${msg}`;
@@ -270,9 +259,6 @@
       log(`JS ERROR: ${message} @ ${lineno}:${colno}`);
     };
 
-    // =========================
-    // BLE
-    // =========================
     function packet(r,g,b){
       return new Uint8Array([0x7e,0x07,0x05,0x03,r,g,b,0x10,0xef]);
     }
@@ -334,9 +320,6 @@
       setLight(255,0,0);
     }
 
-    // =========================
-    // YOUTUBE PLAYER
-    // =========================
     function onYouTubeIframeAPIReady(){
       ytPlayer = new YT.Player("player", {
         height: "250",
@@ -359,7 +342,6 @@
             log("YouTube player error: " + e.data);
           },
           onStateChange: (e) => {
-            // -1 unstarted, 0 ended, 1 playing, 2 paused, 3 buffering, 5 cued
             log("YouTube state: " + e.data);
           }
         }
@@ -376,9 +358,7 @@
 
         ytPlayer.mute();
         ytPlayer.playVideo();
-
         await new Promise(r => setTimeout(r, 400));
-
         ytPlayer.pauseVideo();
         ytPlayer.unMute();
         ytPlayer.setVolume(currentVolume);
@@ -544,9 +524,6 @@
       log("YT VOLUME -> " + currentVolume);
     }
 
-    // =========================
-    // SPEAK
-    // =========================
     function speak(text){
       try{
         window.speechSynthesis.cancel();
@@ -560,9 +537,6 @@
       }
     }
 
-    // =========================
-    // FAST LOCAL COMMAND PARSING
-    // =========================
     const COLOR_MAP = {
       red:[255,0,0],
       blue:[0,0,255],
@@ -631,29 +605,127 @@
       return null;
     }
 
-    // =========================
-    // VOICE
-    // =========================
-    function getWakeWord(text){
-      const t = text.toLowerCase();
-      for(const w of WAKE_WORDS){
-        if(t.includes(w)) return w;
-      }
-      return null;
+    function normalizeWakeInput(text){
+      return (text || "")
+        .toLowerCase()
+        .replace(/[^\w\s']/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
     }
 
-    function createRecognition(){
-      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    function heardWakeWord(text){
+      const t = normalizeWakeInput(text);
+      return (
+        t.includes("drake") ||
+        t.includes("drink") ||
+        t.includes("break") ||
+        t.includes("dark") ||
+        t.includes("dre")
+      );
+    }
+
+    function stripWakeWord(text){
+      return normalizeWakeInput(text)
+        .replace(/\b(drake|drink|break|dark|dre)\b/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+
+    function getSpeechCtor(){
+      return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+    }
+
+    async function setupMicHints(){
+      try{
+        await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            channelCount: 1
+          }
+        });
+        log("MIC OPTIMIZED");
+      }catch(e){
+        log("MIC SETUP ERROR: " + e);
+      }
+    }
+
+    async function tryInstallOfflineSpeech(){
+      const SR = getSpeechCtor();
+      if(!SR) return false;
+
+      try{
+        if(typeof SR.available !== "function" || typeof SR.install !== "function"){
+          log("OFFLINE SPEECH API NOT EXPOSED");
+          return false;
+        }
+
+        const opts = { langs: ["en-US"], processLocally: true };
+        const state = await SR.available(opts);
+        log("OFFLINE SPEECH STATE -> " + state);
+
+        if(state === "available") return true;
+
+        if(state === "downloadable" || state === "downloading"){
+          const ok = await SR.install({ langs: ["en-US"] });
+          log("OFFLINE PACK INSTALL -> " + ok);
+          if(ok) return true;
+        }
+
+        return false;
+      }catch(e){
+        log("OFFLINE SPEECH INSTALL ERROR: " + e);
+        return false;
+      }
+    }
+
+    async function createRecognition(){
+      const SR = getSpeechCtor();
       if(!SR){
-        log("SpeechRecognition not supported");
+        log("SpeechRecognition unsupported");
         setStatus("SpeechRecognition unsupported");
         return null;
       }
 
       const rec = new SR();
+
       rec.continuous = true;
-      rec.interimResults = false;
+      rec.interimResults = true;
       rec.lang = "en-US";
+      rec.maxAlternatives = 3;
+
+      try{
+        if("processLocally" in rec){
+          const offlineOk = await tryInstallOfflineSpeech();
+          rec.processLocally = !!offlineOk;
+          log("PROCESS LOCALLY -> " + rec.processLocally);
+        }
+      }catch(e){
+        log("PROCESS LOCALLY ERROR: " + e);
+      }
+
+      try{
+        if("phrases" in rec && "SpeechRecognitionPhrase" in window){
+          rec.phrases = [
+            new SpeechRecognitionPhrase("drake", 10.0),
+            new SpeechRecognitionPhrase("drink", 7.0),
+            new SpeechRecognitionPhrase("break", 7.0),
+            new SpeechRecognitionPhrase("dark", 6.0),
+            new SpeechRecognitionPhrase("dre", 6.0),
+            new SpeechRecognitionPhrase("play", 5.0),
+            new SpeechRecognitionPhrase("pause music", 5.0),
+            new SpeechRecognitionPhrase("resume music", 5.0),
+            new SpeechRecognitionPhrase("stop music", 5.0),
+            new SpeechRecognitionPhrase("red light", 5.0),
+            new SpeechRecognitionPhrase("blue light", 5.0),
+            new SpeechRecognitionPhrase("brightness", 5.0)
+          ];
+          log("PHRASE BIAS ENABLED");
+        }
+      }catch(e){
+        log("PHRASE BIAS ERROR: " + e);
+      }
 
       rec.onstart = () => {
         log("VOICE ACTIVE");
@@ -663,21 +735,31 @@
 
       rec.onresult = async (e) => {
         try{
-          const text = e.results[e.results.length - 1][0].transcript.toLowerCase().trim();
-          log("HEARD -> " + text);
+          const result = e.results[e.results.length - 1];
+          const alt = result[0];
+          const transcript = normalizeWakeInput(alt.transcript);
+          const confidence = typeof alt.confidence === "number" ? alt.confidence : -1;
+
+          log(`HEARD -> ${transcript} | conf=${confidence} | final=${result.isFinal}`);
+
+          if(!result.isFinal) return;
+          if(handlingSpeech) return;
 
           const now = Date.now();
-          if(now - lastCommandAt < 700){
-            log("VOICE cooldown");
+          if(now - lastCommandAt < 650){
+            log("VOICE COOLDOWN");
             return;
           }
 
-          if(handlingSpeech) return;
+          if(confidence !== -1 && confidence < 0.35){
+            log("LOW CONFIDENCE SKIP");
+            return;
+          }
 
-          const wake = getWakeWord(text);
-          if(!wake) return;
+          if(!heardWakeWord(transcript)) return;
 
-          let command = text.replace(wake, "").trim();
+          let command = stripWakeWord(transcript);
+
           if(!command){
             speak("Yes?");
             return;
@@ -687,7 +769,6 @@
           handlingSpeech = true;
           setStatus("processing...");
 
-          // fast local light command
           const localLight = parseLocalLightCommand(command);
           if(localLight){
             log("LOCAL LIGHT COMMAND");
@@ -697,7 +778,6 @@
             return;
           }
 
-          // fast local music command
           const localMusic = parseLocalMusicCommand(command);
           if(localMusic){
             log("LOCAL MUSIC COMMAND");
@@ -707,7 +787,6 @@
             return;
           }
 
-          // AI fallback
           await askAI(command);
           handlingSpeech = false;
           setStatus("voice active");
@@ -719,7 +798,20 @@
 
       rec.onerror = (e) => {
         if(e.error === "no-speech"){
-          log("VOICE idle");
+          log("VOICE IDLE");
+          return;
+        }
+        if(e.error === "aborted"){
+          log("VOICE ABORTED");
+          return;
+        }
+        if(e.error === "network"){
+          log("VOICE NETWORK ERROR");
+          return;
+        }
+        if(e.error === "language-not-supported"){
+          log("VOICE LANGUAGE PACK MISSING");
+          speak("Offline speech language pack missing");
           return;
         }
         log("VOICE ERROR: " + e.error);
@@ -728,29 +820,33 @@
       rec.onend = () => {
         log("VOICE ENDED");
         setVoiceIndicator("ended");
-        if(!manuallyStoppedVoice){
-          clearTimeout(pendingVoiceRestart);
-          pendingVoiceRestart = setTimeout(() => {
-            try{
-              rec.start();
-              log("VOICE RESTART");
-            }catch(e){
-              log("VOICE RESTART ERROR: " + e);
-            }
-          }, 250);
-        }
+
+        if(manuallyStoppedVoice) return;
+
+        clearTimeout(voiceRestartTimer);
+        voiceRestartTimer = setTimeout(() => {
+          try{
+            rec.start();
+            log("VOICE RESTART");
+          }catch(e){
+            log("VOICE RESTART ERROR: " + e);
+          }
+        }, 180);
       };
 
       return rec;
     }
 
-    function startVoice(){
+    async function startVoice(){
+      await setupMicHints();
+
       if(!recognition){
-        recognition = createRecognition();
+        recognition = await createRecognition();
         if(!recognition) return;
       }
 
       manuallyStoppedVoice = false;
+
       try{
         recognition.start();
       }catch(e){
@@ -760,6 +856,8 @@
 
     function stopVoice(){
       manuallyStoppedVoice = true;
+      clearTimeout(voiceRestartTimer);
+
       if(recognition){
         try{
           recognition.stop();
@@ -767,13 +865,11 @@
           log("VOICE STOP ERROR: " + e);
         }
       }
+
       setVoiceIndicator("stopped");
       setStatus("voice stopped");
     }
 
-    // =========================
-    // AI
-    // =========================
     const SYSTEM_PROMPT = `
 You are Drake, a smart assistant that controls BLE RGB lights, YouTube music, and answers questions.
 
@@ -922,9 +1018,6 @@ Rules:
       log("Unhandled AI object: " + JSON.stringify(obj));
     }
 
-    // =========================
-    // BOOT
-    // =========================
     window.addEventListener("load", () => {
       log("Page loaded");
       setStatus("ready");
@@ -934,4 +1027,4 @@ Rules:
     });
   </script>
 </body>
-</html> 
+</html>
