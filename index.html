@@ -932,7 +932,7 @@ Rules:
       setBleState("not connected");
       setArmState("not armed");
     });
-  <!-- ================= MOBILE FRIENDLY HOLOGRAM ================= -->
+<!-- ================= AUTO HOLOGRAM ================= -->
 
 <button id="holoBtn">HOLOGRAM</button>
 
@@ -951,7 +951,7 @@ Rules:
       execution-while-out-of-viewport
       execution-while-not-rendered
       web-share
-      src="https://sketchfab.com/models/3f5d39aba2c142e38895cba7f7dfd924/embed?autospin=1&autostart=1&ui_theme=dark&ui_controls=1&ui_infos=0&ui_stop=0&ui_hint=0&ui_annotations=0&preload=1">
+      src="https://sketchfab.com/models/3f5d39aba2c142e38895cba7f7dfd924/embed?autospin=1&autostart=1&ui_theme=dark&ui_controls=1&ui_infos=0&ui_stop=0&ui_hint=0&ui_annotations=0&transparent=1">
     </iframe>
   </div>
 </div>
@@ -983,8 +983,8 @@ Rules:
 
 #holoBox{
   position:relative;
-  width:min(78vw, 340px);
-  height:min(78vw, 340px);
+  width:min(92vw, 420px);
+  aspect-ratio:1/1;
   display:flex;
   justify-content:center;
   align-items:center;
@@ -995,11 +995,11 @@ Rules:
   height:100%;
   border:none;
   background:#000;
-  border-radius:12px;
   filter:brightness(1.05) contrast(1.15);
+  border-radius:16px;
 }
 
-/* overlay will not block touch */
+/* overlay tint */
 #holoOverlay{
   position:absolute;
   inset:0;
@@ -1010,10 +1010,12 @@ Rules:
   z-index:2;
 }
 
+/* active listening = blue */
 .holo-active #holoOverlay{
-  background:rgba(0,140,255,0.16);
+  background:rgba(0,150,255,0.18);
 }
 
+/* speaking pulse */
 .holo-speaking #holoBox{
   animation:holoPulse 0.35s infinite;
 }
@@ -1024,6 +1026,7 @@ Rules:
   100%{transform:scale(1)}
 }
 
+/* phone optimization */
 @media (max-width: 600px){
   #holoBtn{
     top:12px;
@@ -1033,10 +1036,11 @@ Rules:
   }
 
   #holoBox{
-    width:72vw;
-    height:72vw;
-    max-width:280px;
-    max-height:280px;
+    width:88vw;
+  }
+
+  #holoFrame{
+    border-radius:12px;
   }
 }
 </style>
@@ -1044,14 +1048,12 @@ Rules:
 <script>
 let holoOn = false;
 
-// open hologram
 document.getElementById("holoBtn").onclick = () => {
   document.getElementById("holoWrap").style.display = "flex";
   holoOn = true;
   history.pushState({ holo:true }, "");
 };
 
-// back button = close hologram
 window.addEventListener("popstate", () => {
   if(holoOn){
     document.getElementById("holoWrap").style.display = "none";
@@ -1060,33 +1062,37 @@ window.addEventListener("popstate", () => {
   }
 });
 
-// auto detect voice state from your existing status text
+/* auto detect voice state from status text */
 setInterval(() => {
   const statusText = (document.getElementById("status")?.innerText || "").toLowerCase();
 
-  if(statusText.includes("voice active") || statusText.includes("active")){
+  if(
+    statusText.includes("voice active") ||
+    statusText.includes("listening") ||
+    statusText.includes("active")
+  ){
     document.body.classList.add("holo-active");
   }else{
     document.body.classList.remove("holo-active");
   }
 }, 300);
 
-// auto detect speaking by hooking speech synthesis
-const oldSpeak = window.speechSynthesis.speak.bind(window.speechSynthesis);
+/* auto hook speaking */
+const originalSpeak = window.speechSynthesis.speak.bind(window.speechSynthesis);
 
 window.speechSynthesis.speak = function(utterance){
   document.body.classList.add("holo-speaking");
 
   const oldOnEnd = utterance.onend;
-  utterance.onend = function(...args){
+  utterance.onend = function(e){
     document.body.classList.remove("holo-speaking");
-    if (typeof oldOnEnd === "function") oldOnEnd.apply(this, args);
+    if(oldOnEnd) oldOnEnd(e);
   };
 
-  return oldSpeak(utterance);
+  return originalSpeak(utterance);
 };
 </script>
 
-<!-- ================= END MOBILE FRIENDLY HOLOGRAM ================= --> 
+<!-- ================= END AUTO HOLOGRAM ================= -->
 </body>
 </html>
