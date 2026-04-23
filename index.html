@@ -359,7 +359,7 @@
             log("YouTube player error: " + e.data);
           },
           onStateChange: (e) => {
-            // -1 unstarted, 0 ended, 1 playing, 2 paused, 3 buffering, 5 cued
+            // -1 unstarted, 0 ended, 1 playing, 3 buffering, 5 cued
             log("YouTube state: " + e.data);
           }
         }
@@ -612,9 +612,7 @@
     function parseLocalMusicCommand(text){
       const t = text.toLowerCase().trim();
 
-      if(t.includes("pause music") || t === "pause"){
-        return {type:"music", action:"pause"};
-      }
+   
 
       if(t.includes("resume music") || t.includes("continue music") || t === "resume"){
         return {type:"music", action:"resume"};
