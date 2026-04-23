@@ -15,6 +15,7 @@
       --blue:#2d6cdf;
       --gray:#2b2f3a;
       --border:#2a3140;
+      --warn:#ffd37a;
     }
     *{box-sizing:border-box}
     body{
@@ -51,7 +52,7 @@
     }
     .grid{
       display:grid;
-      grid-template-columns: 1.2fr 0.8fr;
+      grid-template-columns:1.2fr 0.8fr;
       gap:14px;
       padding:0 14px 14px;
     }
@@ -93,7 +94,7 @@
       border-radius:12px;
       overflow:hidden;
       background:#000;
-      min-height:250px;
+      min-height:280px;
       display:flex;
       align-items:center;
       justify-content:center;
@@ -101,7 +102,7 @@
     #player{
       width:100%;
       max-width:100%;
-      height:250px;
+      height:280px;
     }
     .row{
       display:flex;
@@ -125,7 +126,7 @@
       width:100%;
     }
     #nowPlaying{
-      color:#ffd37a;
+      color:var(--warn);
       font-weight:700;
       margin-top:10px;
       min-height:20px;
@@ -148,11 +149,11 @@
     <button onclick="armMedia()">ARM AUDIO</button>
     <button onclick="startVoice()">START VOICE</button>
     <button class="secondary" onclick="stopVoice()">STOP VOICE</button>
+    <button class="secondary" onclick="stopMusic()">STOP MUSIC</button>
     <button class="secondary" onclick="testRed()">TEST RED</button>
     <button class="secondary" onclick="setLight(0,0,255)">TEST BLUE</button>
-    <button class="secondary" onclick="pauseMusic()">PAUSE</button>
-    <button class="secondary" onclick="resumeMusic()">RESUME</button>
-    <button class="secondary" onclick="stopMusic()">STOP</button>
+    <button class="secondary" onclick="setLight(255,255,255)">TEST WHITE</button>
+    <button class="secondary" onclick="clearDebug()">CLEAR DEBUG</button>
   </div>
 
   <div id="status">idle</div>
@@ -180,20 +181,21 @@
       <div class="title">Status</div>
       <span class="badge">Wake: drake / drink / break / dark / dre</span>
       <span class="badge">BLE: CLK</span>
-      <span class="badge">Music: YouTube exact search</span>
+      <span class="badge">Music: YouTube</span>
+      <span class="badge">Stop only</span>
       <div class="kv">
         <div>Voice</div><div id="voiceIndicator">stopped</div>
         <div>BLE</div><div id="bleState">not connected</div>
         <div>Audio Arm</div><div id="armState">not armed</div>
+        <div>Volume</div><div id="volState">50</div>
       </div>
       <div class="mini" style="margin-top:12px">
         Example commands:<br>
         <b>Drake play god's plan</b><br>
         <b>Drake play naksha</b><br>
-        <b>Drake pause music</b><br>
-        <b>Drake resume music</b><br>
         <b>Drake stop music</b><br>
         <b>Drake set light red</b><br>
+        <b>Drake blue light</b><br>
         <b>Drake brightness 30</b><br>
         <b>Drake what is photosynthesis</b>
       </div>
@@ -204,8 +206,6 @@
     <div class="title">Debug</div>
     <pre id="debug"></pre>
   </div>
-
-  <div id="playerHiddenAnchor" style="position:fixed;left:-9999px;top:-9999px"></div>
 
   <script src="https://www.youtube.com/iframe_api"></script>
   <script>
@@ -230,6 +230,7 @@
     let manuallyStoppedVoice = false;
     let handlingSpeech = false;
     let lastCommandAt = 0;
+    let restartTimer = null;
 
     let ytPlayer = null;
     let ytReady = false;
@@ -237,10 +238,8 @@
     let currentVolume = 50;
     let currentVideo = null;
 
-    let pendingVoiceRestart = null;
-
     // =========================
-    // UI
+    // UI HELPERS
     // =========================
     function log(msg){
       const box = document.getElementById("debug");
@@ -248,6 +247,10 @@
       box.textContent += line + "\n";
       box.scrollTop = box.scrollHeight;
       console.log(line);
+    }
+
+    function clearDebug(){
+      document.getElementById("debug").textContent = "";
     }
 
     function setStatus(text){
@@ -263,673 +266,4 @@
     }
 
     function setArmState(text){
-      document.getElementById("armState").innerText = text;
-    }
-
-    window.onerror = function(message, source, lineno, colno){
-      log(`JS ERROR: ${message} @ ${lineno}:${colno}`);
-    };
-
-    // =========================
-    // BLE
-    // =========================
-    function packet(r,g,b){
-      return new Uint8Array([0x7e,0x07,0x05,0x03,r,g,b,0x10,0xef]);
-    }
-
-    async function connectBLE(){
-      try{
-        setStatus("scanning BLE...");
-        log("Scanning BLE light...");
-
-        bleDevice = await navigator.bluetooth.requestDevice({
-          filters:[{namePrefix: DEVICE_NAME}],
-          optionalServices:[SERVICE_UUID]
-        });
-
-        bleDevice.addEventListener("gattserverdisconnected", () => {
-          bleChar = null;
-          log("BLE disconnected");
-          setBleState("disconnected");
-          setStatus("BLE disconnected");
-        });
-
-        const server = await bleDevice.gatt.connect();
-        const service = await server.getPrimaryService(SERVICE_UUID);
-        bleChar = await service.getCharacteristic(CHAR_UUID);
-
-        log("BLE connected");
-        setBleState("connected");
-        setStatus("BLE connected");
-      }catch(e){
-        log("BLE ERROR: " + e);
-        setBleState("error");
-        setStatus("BLE error");
-      }
-    }
-
-    async function setLight(r,g,b){
-      if(!bleChar){
-        log("BLE not connected");
-        return;
-      }
-
-      r = Math.max(0, Math.min(255, Math.round(r)));
-      g = Math.max(0, Math.min(255, Math.round(g)));
-      b = Math.max(0, Math.min(255, Math.round(b)));
-
-      try{
-        if(typeof bleChar.writeValueWithoutResponse === "function"){
-          await bleChar.writeValueWithoutResponse(packet(r,g,b));
-        }else{
-          await bleChar.writeValue(packet(r,g,b));
-        }
-        log(`LIGHT -> ${r},${g},${b}`);
-      }catch(e){
-        log("BLE WRITE ERROR: " + e);
-      }
-    }
-
-    function testRed(){
-      setLight(255,0,0);
-    }
-
-    // =========================
-    // YOUTUBE PLAYER
-    // =========================
-    function onYouTubeIframeAPIReady(){
-      ytPlayer = new YT.Player("player", {
-        height: "250",
-        width: "100%",
-        videoId: "",
-        playerVars: {
-          autoplay: 0,
-          controls: 1,
-          rel: 0,
-          playsinline: 1,
-          modestbranding: 1
-        },
-        events: {
-          onReady: () => {
-            ytReady = true;
-            ytPlayer.setVolume(currentVolume);
-            log("YouTube player ready");
-          },
-          onError: (e) => {
-            log("YouTube player error: " + e.data);
-          },
-          onStateChange: (e) => {
-            // -1 unstarted, 0 ended, 1 playing, 3 buffering, 5 cued
-            log("YouTube state: " + e.data);
-          }
-        }
-      });
-    }
-    window.onYouTubeIframeAPIReady = onYouTubeIframeAPIReady;
-
-    async function armMedia(){
-      try{
-        if(!ytReady || !ytPlayer){
-          log("Player not ready yet");
-          return;
-        }
-
-        ytPlayer.mute();
-        ytPlayer.playVideo();
-
-        await new Promise(r => setTimeout(r, 400));
-
-        ytPlayer.pauseVideo();
-        ytPlayer.unMute();
-        ytPlayer.setVolume(currentVolume);
-
-        mediaArmed = true;
-        setArmState("armed");
-        log("MEDIA ARMED");
-        setStatus("audio armed");
-        speak("Audio armed");
-      }catch(e){
-        log("ARM MEDIA ERROR: " + e);
-      }
-    }
-
-    async function searchYouTubeVideo(query){
-      const url =
-        "https://www.googleapis.com/youtube/v3/search" +
-        "?part=snippet" +
-        "&type=video" +
-        "&maxResults=5" +
-        "&videoEmbeddable=true" +
-        "&safeSearch=none" +
-        "&q=" + encodeURIComponent(query) +
-        "&key=" + encodeURIComponent(YT_API_KEY);
-
-      const res = await fetch(url);
-      const data = await res.json();
-
-      if(!res.ok){
-        throw new Error("YouTube HTTP " + res.status + " " + JSON.stringify(data));
-      }
-
-      if(!data.items || !data.items.length){
-        throw new Error("No YouTube video found");
-      }
-
-      return data.items;
-    }
-
-    function normalizeText(s){
-      return (s || "")
-        .toLowerCase()
-        .replace(/['’"]/g, "")
-        .replace(/[^a-z0-9\s]/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
-    }
-
-    function scoreVideo(item, query){
-      const q = normalizeText(query);
-      const title = normalizeText(item?.snippet?.title || "");
-      const channel = normalizeText(item?.snippet?.channelTitle || "");
-      let score = 0;
-
-      if(title === q) score += 200;
-      if(title.includes(q)) score += 120;
-
-      const words = q.split(" ").filter(Boolean);
-      for(const w of words){
-        if(title.includes(w)) score += 15;
-        if(channel.includes(w)) score += 4;
-      }
-
-      if(title.includes("official")) score += 20;
-      if(title.includes("audio")) score += 10;
-      if(title.includes("lyrics")) score -= 5;
-      if(title.includes("cover")) score -= 20;
-      if(title.includes("remix")) score -= 10;
-      if(title.includes("live")) score -= 8;
-      if(title.includes("shorts")) score -= 60;
-
-      return score;
-    }
-
-    async function playMusic(query){
-      try{
-        if(!mediaArmed){
-          log("MEDIA NOT ARMED");
-          speak("Pehle arm audio button dabao");
-          return;
-        }
-
-        if(!ytReady || !ytPlayer){
-          log("YT player not ready");
-          return;
-        }
-
-        setStatus("Searching YouTube...");
-        log("YT SEARCH -> " + query);
-
-        const items = await searchYouTubeVideo(query);
-
-        let best = null;
-        let bestScore = -99999;
-
-        for(const item of items){
-          const score = scoreVideo(item, query);
-          log(`YT CANDIDATE -> ${item.snippet.title} | score=${score}`);
-          if(score > bestScore){
-            bestScore = score;
-            best = item;
-          }
-        }
-
-        if(!best || !best.id || !best.id.videoId){
-          throw new Error("No playable result");
-        }
-
-        const videoId = best.id.videoId;
-        currentVideo = {
-          id: videoId,
-          title: best.snippet.title,
-          channel: best.snippet.channelTitle
-        };
-
-        ytPlayer.loadVideoById(videoId);
-        ytPlayer.setVolume(currentVolume);
-        ytPlayer.playVideo();
-
-        document.getElementById("nowPlaying").innerText =
-          "Now playing: " + currentVideo.title + " — " + currentVideo.channel;
-
-        log(`YT PLAY -> ${currentVideo.title} (${videoId})`);
-        setStatus("Playing music");
-      }catch(e){
-        log("YT PLAY ERROR: " + e.message);
-        speak("Song nahi mila ya play nahi hua");
-      }
-    }
-
-    function pauseMusic(){
-      if(ytPlayer && ytReady){
-        ytPlayer.pauseVideo();
-        log("YT PAUSE");
-      }
-    }
-
-    function resumeMusic(){
-      if(!mediaArmed){
-        speak("Pehle arm audio button dabao");
-        return;
-      }
-      if(ytPlayer && ytReady){
-        ytPlayer.playVideo();
-        log("YT RESUME");
-      }
-    }
-
-    function stopMusic(){
-      if(ytPlayer && ytReady){
-        ytPlayer.stopVideo();
-        log("YT STOP");
-        document.getElementById("nowPlaying").innerText = "Nothing playing";
-      }
-    }
-
-    function setPlayerVolume(v){
-      currentVolume = Number(v);
-      document.getElementById("volSlider").value = currentVolume;
-      if(ytPlayer && ytReady){
-        ytPlayer.setVolume(currentVolume);
-      }
-      log("YT VOLUME -> " + currentVolume);
-    }
-
-    // =========================
-    // SPEAK
-    // =========================
-    function speak(text){
-      try{
-        window.speechSynthesis.cancel();
-        const u = new SpeechSynthesisUtterance(text);
-        u.lang = "en-US";
-        u.rate = 1;
-        window.speechSynthesis.speak(u);
-        log("SPEAK -> " + text);
-      }catch(e){
-        log("SPEAK ERROR: " + e);
-      }
-    }
-
-    // =========================
-    // FAST LOCAL COMMAND PARSING
-    // =========================
-    const COLOR_MAP = {
-      red:[255,0,0],
-      blue:[0,0,255],
-      green:[0,255,0],
-      white:[255,255,255],
-      yellow:[255,255,0],
-      purple:[128,0,128],
-      pink:[255,105,180],
-      orange:[255,140,0],
-      cyan:[0,255,255]
-    };
-
-    function extractBrightness(text){
-      const m = text.match(/brightness\s+(\d{1,3})/i);
-      if(!m) return null;
-      return Math.max(0, Math.min(100, Number(m[1])));
-    }
-
-    function parseLocalLightCommand(text){
-      const t = text.toLowerCase();
-
-      if(t.includes("turn off light") || t.includes("light off")){
-        return {type:"light", action:"color", value:[0,0,0]};
-      }
-
-      if(t.includes("turn on light") || t.includes("light on")){
-        return {type:"light", action:"color", value:[255,255,255]};
-      }
-
-      const brightness = extractBrightness(t);
-      if(brightness !== null){
-        return {type:"light", action:"brightness", value:brightness};
-      }
-
-      for(const [name, rgb] of Object.entries(COLOR_MAP)){
-        if(t.includes(name) && t.includes("light")){
-          return {type:"light", action:"color", value:rgb};
-        }
-        if(t.includes("make light " + name) || t.includes("set light " + name)){
-          return {type:"light", action:"color", value:rgb};
-        }
-      }
-
-      return null;
-    }
-
-    function parseLocalMusicCommand(text){
-      const t = text.toLowerCase().trim();
-
-   
-
-      if(t.includes("resume music") || t.includes("continue music") || t === "resume"){
-        return {type:"music", action:"resume"};
-      }
-
-      if(t.includes("stop music") || t === "stop"){
-        return {type:"music", action:"stop"};
-      }
-
-      if(t.startsWith("play ")){
-        return {type:"music", action:"play", query:text.replace(/^play\s+/i,"").trim()};
-      }
-
-      return null;
-    }
-
-    // =========================
-    // VOICE
-    // =========================
-    function getWakeWord(text){
-      const t = text.toLowerCase();
-      for(const w of WAKE_WORDS){
-        if(t.includes(w)) return w;
-      }
-      return null;
-    }
-
-    function createRecognition(){
-      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-      if(!SR){
-        log("SpeechRecognition not supported");
-        setStatus("SpeechRecognition unsupported");
-        return null;
-      }
-
-      const rec = new SR();
-      rec.continuous = true;
-      rec.interimResults = false;
-      rec.lang = "en-US";
-
-      rec.onstart = () => {
-        log("VOICE ACTIVE");
-        setVoiceIndicator("active");
-        setStatus("voice active");
-      };
-
-      rec.onresult = async (e) => {
-        try{
-          const text = e.results[e.results.length - 1][0].transcript.toLowerCase().trim();
-          log("HEARD -> " + text);
-
-          const now = Date.now();
-          if(now - lastCommandAt < 700){
-            log("VOICE cooldown");
-            return;
-          }
-
-          if(handlingSpeech) return;
-
-          const wake = getWakeWord(text);
-          if(!wake) return;
-
-          let command = text.replace(wake, "").trim();
-          if(!command){
-            speak("Yes?");
-            return;
-          }
-
-          lastCommandAt = now;
-          handlingSpeech = true;
-          setStatus("processing...");
-
-          // fast local light command
-          const localLight = parseLocalLightCommand(command);
-          if(localLight){
-            log("LOCAL LIGHT COMMAND");
-            await handleAI(localLight);
-            handlingSpeech = false;
-            setStatus("voice active");
-            return;
-          }
-
-          // fast local music command
-          const localMusic = parseLocalMusicCommand(command);
-          if(localMusic){
-            log("LOCAL MUSIC COMMAND");
-            await handleAI(localMusic);
-            handlingSpeech = false;
-            setStatus("voice active");
-            return;
-          }
-
-          // AI fallback
-          await askAI(command);
-          handlingSpeech = false;
-          setStatus("voice active");
-        }catch(err){
-          handlingSpeech = false;
-          log("VOICE RESULT ERROR: " + err);
-        }
-      };
-
-      rec.onerror = (e) => {
-        if(e.error === "no-speech"){
-          log("VOICE idle");
-          return;
-        }
-        log("VOICE ERROR: " + e.error);
-      };
-
-      rec.onend = () => {
-        log("VOICE ENDED");
-        setVoiceIndicator("ended");
-        if(!manuallyStoppedVoice){
-          clearTimeout(pendingVoiceRestart);
-          pendingVoiceRestart = setTimeout(() => {
-            try{
-              rec.start();
-              log("VOICE RESTART");
-            }catch(e){
-              log("VOICE RESTART ERROR: " + e);
-            }
-          }, 250);
-        }
-      };
-
-      return rec;
-    }
-
-    function startVoice(){
-      if(!recognition){
-        recognition = createRecognition();
-        if(!recognition) return;
-      }
-
-      manuallyStoppedVoice = false;
-      try{
-        recognition.start();
-      }catch(e){
-        log("VOICE START ERROR: " + e);
-      }
-    }
-
-    function stopVoice(){
-      manuallyStoppedVoice = true;
-      if(recognition){
-        try{
-          recognition.stop();
-        }catch(e){
-          log("VOICE STOP ERROR: " + e);
-        }
-      }
-      setVoiceIndicator("stopped");
-      setStatus("voice stopped");
-    }
-
-    // =========================
-    // AI
-    // =========================
-    const SYSTEM_PROMPT = `
-You are Drake, a smart assistant that controls BLE RGB lights, YouTube music, and answers questions.
-
-IMPORTANT:
-- Reply ONLY in valid JSON.
-- No markdown.
-- No code fences.
-- No explanation outside JSON.
-
-Formats:
-
-Light color:
-{"type":"light","action":"color","value":[255,0,0]}
-
-Brightness:
-{"type":"light","action":"brightness","value":30}
-
-Music play:
-{"type":"music","action":"play","query":"God's Plan Drake"}
-
-Music pause:
-{"type":"music","action":"pause"}
-
-Music resume:
-{"type":"music","action":"resume"}
-
-Music stop:
-{"type":"music","action":"stop"}
-
-Question:
-{"type":"question","response":"your answer","speak":true}
-
-Combo:
-{"type":"combo","actions":[
-  {"type":"light","action":"color","value":[0,0,255]},
-  {"type":"music","action":"play","query":"lofi"}
-]}
-
-Rules:
-- Preserve exact song names in music query.
-- For color requests, return explicit RGB values.
-- For brightness, return 0 to 100.
-- For normal questions, answer short and clean.
-`;
-
-    function cleanAIResponse(text){
-      return (text || "")
-        .replace(/```json/gi, "")
-        .replace(/```/g, "")
-        .trim();
-    }
-
-    async function askAI(userText){
-      log("AI ASK -> " + userText);
-
-      try{
-        const res = await fetch("https://api.mistral.ai/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Authorization": "Bearer " + MISTRAL_API_KEY,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            model: "mistral-large-latest",
-            messages: [
-              {role:"system", content:SYSTEM_PROMPT},
-              {role:"user", content:userText}
-            ],
-            temperature: 0.2
-          })
-        });
-
-        const data = await res.json();
-
-        if(!res.ok){
-          log("MISTRAL HTTP ERROR: " + res.status + " " + JSON.stringify(data));
-          return;
-        }
-
-        let raw = data?.choices?.[0]?.message?.content || "";
-        raw = cleanAIResponse(raw);
-        log("AI RAW -> " + raw);
-
-        const obj = JSON.parse(raw);
-        await handleAI(obj);
-      }catch(e){
-        log("AI ERROR: " + e);
-        speak("AI error aaya");
-      }
-    }
-
-    async function handleAI(obj){
-      if(!obj || !obj.type){
-        log("Invalid AI object");
-        return;
-      }
-
-      if(obj.type === "combo" && Array.isArray(obj.actions)){
-        for(const action of obj.actions){
-          await handleAI(action);
-        }
-        return;
-      }
-
-      if(obj.type === "light"){
-        if(obj.action === "color" && Array.isArray(obj.value) && obj.value.length === 3){
-          await setLight(obj.value[0], obj.value[1], obj.value[2]);
-          return;
-        }
-
-        if(obj.action === "brightness"){
-          const pct = Math.max(0, Math.min(100, Number(obj.value) || 0));
-          const v = Math.round((pct / 100) * 255);
-          await setLight(v,v,v);
-          return;
-        }
-      }
-
-      if(obj.type === "music"){
-        if(obj.action === "play" && obj.query){
-          await playMusic(obj.query);
-          return;
-        }
-        if(obj.action === "pause"){
-          pauseMusic();
-          return;
-        }
-        if(obj.action === "resume"){
-          resumeMusic();
-          return;
-        }
-        if(obj.action === "stop"){
-          stopMusic();
-          return;
-        }
-      }
-
-      if(obj.type === "question"){
-        if(obj.response){
-          log("AI ANSWER -> " + obj.response);
-          if(obj.speak) speak(obj.response);
-        }
-        return;
-      }
-
-      log("Unhandled AI object: " + JSON.stringify(obj));
-    }
-
-    // =========================
-    // BOOT
-    // =========================
-    window.addEventListener("load", () => {
-      log("Page loaded");
-      setStatus("ready");
-      setVoiceIndicator("stopped");
-      setBleState("not connected");
-      setArmState("not armed");
-    });
-  </script>
-</body>
-</html>
+      document.getElement
